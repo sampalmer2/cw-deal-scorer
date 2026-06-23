@@ -1388,10 +1388,31 @@ with tab_score:
             'equip_lease_alignment':     equip_lease_alignment,
         }
         result = score_property(inputs)
+        # Cache so the display + override section survive checkbox re-renders
+        st.session_state['_last_score'] = {
+            'result':  result,
+            'inputs':  inputs,
+            'notes':   notes,
+            'caveats': caveats,
+        }
+        st.session_state.pop('_score_saved', None)
+
+    # ── Results + Override ────────────────────────────────────────────────────
+    # Reads from session_state so it persists when the override checkbox reruns.
+    _cached = st.session_state.get('_last_score')
+    if _cached:
+        result    = _cached['result']
+        inputs    = _cached['inputs']
+        _notes    = _cached['notes']
+        _caveats  = _cached['caveats']
+        _addr     = inputs.get('address', '')
+        _city     = inputs.get('city', '')
+        _state    = inputs.get('state', '')
+        result_ac = result.get('Asset Class', 'automotive_service')
 
         st.divider()
-        if address:
-            st.markdown(f"### {address}, {city} {state}")
+        if _addr:
+            st.markdown(f"### {_addr}, {_city} {_state}")
 
         # Scoring mode badge
         scoring_mode = result.get('Scoring Mode', 'Financial Blind')
@@ -1404,7 +1425,7 @@ with tab_score:
 
         # Grade, pool, total score
         fine_grade = result.get('Fine Grade', result['Grade'])
-        if asset_class == 'qsr':
+        if result_ac == 'qsr':
             g1, g2, g3, g4, _ = st.columns([1, 1, 2, 2, 3])
             g1.metric("Fine Grade",    fine_grade,
                       help="5-tier QSR grade: A, A/B, B, B/C, C")
@@ -1431,43 +1452,89 @@ with tab_score:
         st.divider()
 
         # Financial ratios — conditional on scoring mode
-        ebitdar_rent = result.get('EBITDAR/Rent')
+        ebitdar_rent   = result.get('EBITDAR/Rent')
         ebitdar_margin = result.get('EBITDAR Margin')
-        rent_sales = result.get('Rent/Sales')
+        rent_sales     = result.get('Rent/Sales')
 
         if ebitdar_margin is not None and rent_sales is not None:
-            # Automotive with full financials
             st.caption("Financial Ratios")
             m1, m2, m3 = st.columns(3)
             m1.metric("EBITDAR / Rent", f"{ebitdar_rent}x")
             m2.metric("EBITDAR Margin", f"{ebitdar_margin}%")
             m3.metric("Rent / Sales",   f"{rent_sales}%")
         elif ebitdar_rent is not None:
-            # Other asset class with EBITDAR coverage
             st.caption("Financial Ratios")
             m1, _ = st.columns([1, 3])
             m1.metric("EBITDAR / Rent", f"{ebitdar_rent}x")
 
-        if notes:
-            st.info(notes)
-        if caveats:
-            st.warning(caveats)
+        if _notes:
+            st.info(_notes)
+        if _caveats:
+            st.warning(_caveats)
 
-        query = urllib.parse.quote(f"{address}, {city}, {state}")
-        st.markdown(
-            f"[Google Maps](https://www.google.com/maps/search/{query})"
-            f"  ·  "
-            f"[Street View](https://www.google.com/maps?q={query}&layer=c)"
-        )
+        if _addr:
+            query = urllib.parse.quote(f"{_addr}, {_city}, {_state}")
+            st.markdown(
+                f"[Google Maps](https://www.google.com/maps/search/{query})"
+                f"  ·  "
+                f"[Street View](https://www.google.com/maps?q={query}&layer=c)"
+            )
 
-        # Save to database
+        # ── Broker Override ───────────────────────────────────────────────────
         st.divider()
-        if db_ok:
-            try:
-                save_property(inputs, result, notes, caveats)
-                st.success("Saved to database.")
-            except Exception as e:
-                st.warning(f"Score complete — database save failed: {e}")
+        with st.container(border=True):
+            st.markdown("**Broker Override**")
+            st.caption(
+                "Leave unchecked if you agree with the formula grade — "
+                "NULL broker\\_grade = agreement in the database."
+            )
+            override = st.checkbox("Override formula grade", key="_override_chk")
+            broker_grade    = None
+            override_reason = None
+            override_notes  = None
+            if override:
+                grade_opts = ['A', 'A/B', 'B', 'B/C', 'C'] if result_ac == 'qsr' else ['A', 'B', 'C']
+                broker_grade = st.radio(
+                    "Your grade",
+                    grade_opts,
+                    horizontal=True,
+                    key="_broker_grade",
+                )
+                override_reason = st.selectbox(
+                    "Reason for override",
+                    ["Credit not captured", "Location premium", "Market knowledge",
+                     "Lease structure", "Competition vulnerability", "Redevelopment value",
+                     "Relationship dynamics", "Other"],
+                    key="_override_reason",
+                )
+                override_notes = st.text_area(
+                    "Override Notes",
+                    key="_override_notes",
+                    placeholder="Describe why the formula missed this...",
+                )
+                if override_reason == "Other" and not override_notes:
+                    st.warning("Notes are required when reason is 'Other'.")
+
+        # ── Save ─────────────────────────────────────────────────────────────
+        st.divider()
+        if st.session_state.get('_score_saved'):
+            st.success("Saved to database.")
+        elif db_ok:
+            needs_notes = override and override_reason == "Other" and not override_notes
+            if st.button("Save to Database", type="primary", key="_save_btn",
+                         disabled=needs_notes):
+                try:
+                    save_inputs = {
+                        **inputs,
+                        'broker_grade':    broker_grade,
+                        'override_reason': override_reason,
+                        'override_notes':  override_notes,
+                    }
+                    save_property(save_inputs, result, _notes, _caveats)
+                    st.session_state['_score_saved'] = True
+                    st.rerun()
+                except Exception as e:
+                    st.warning(f"Database save failed: {e}")
         else:
             st.info(
                 "Database not configured. "

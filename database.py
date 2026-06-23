@@ -13,7 +13,7 @@ _COLS = [
     'infill_score', 'geo_constraint',
     's1', 's2', 's3', 's4a', 's4b', 's5', 's6',
     'total_score', 'formula_grade', 'formula_pool',
-    'broker_name', 'broker_grade', 'override_reason',
+    'broker_name', 'broker_grade', 'override_reason', 'override_notes',
     'notes', 'caveats', 'formula_version', 'record_type',
 ]
 
@@ -72,6 +72,10 @@ def init_db():
                 ALTER TABLE scores
                     ADD COLUMN IF NOT EXISTS record_type VARCHAR(20) DEFAULT 'test'
             """)
+            cur.execute("""
+                ALTER TABLE scores
+                    ADD COLUMN IF NOT EXISTS override_notes TEXT
+            """)
         conn.commit()
 
 
@@ -125,8 +129,9 @@ def save_property(inputs: dict, result: dict, notes: str, caveats: str):
         'formula_grade':   result['Grade'],
         'formula_pool':    result['Pool'],
         'broker_name':     None,
-        'broker_grade':    None,
-        'override_reason': None,
+        'broker_grade':    inputs.get('broker_grade', None),
+        'override_reason': inputs.get('override_reason', None),
+        'override_notes':  inputs.get('override_notes', None),
         'notes':           notes,
         'caveats':         caveats,
         'formula_version': inputs.get('formula_version', 'v1.1'),
