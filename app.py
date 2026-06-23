@@ -7,6 +7,205 @@ from database import (
 )
 import urllib.parse
 import io
+import openpyxl
+from openpyxl.styles import PatternFill, Font, Alignment
+
+
+def _build_template() -> io.BytesIO:
+    """Generate a pre-formatted Excel scoring template with Column Guide sheet."""
+    INDIGO     = "1D1740"
+    LIGHT_GREY = "F5F6F7"
+    WHITE      = "FFFFFF"
+    GREEN      = "1D6B28"
+    GREY_TEXT  = "6B7280"
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Scoring Template"
+
+    columns = [
+        "Address", "City", "State", "Zip Code",
+        "Annual Rent", "EBITDAR", "Sales",
+        "Building SF", "Store Age", "Year Built", "Lot Size (Acres)", "Num Bays",
+        "Lease Type", "Lease Term (Years)", "Lease Remaining (Years)", "Lease Expiration",
+        "Rent Bumps", "Corporate Guarantee (Y/N)", "Guarantor",
+        "AADT", "Pop 1 Mile", "Pop 3 Mile", "Pop 5 Mile",
+        "Avg HH Income 1 Mile", "Avg HH Income 3 Mile", "Avg HH Income 5 Mile",
+        "MSA", "County", "Market Type",
+        "Site Override (-1/0/1/2)", "Access Score (1-5)", "Loc Override (-1/0/1)",
+        "Infill Score (1-5)", "Geo Constraint (Y/N)",
+        "Brand Tier (1-5)", "Drive Thru Score (1-5)", "Guarantee Score (1-5)",
+        "AUV vs Brand (1-5)", "Operator Score (1-5)",
+        "Membership Pct (1-5)", "Wash Format (1-5)", "Daily Volume (1-5)",
+        "Medical Specialty (1-5)", "Payer Mix (1-5)", "TI Investment (1-5)",
+        "Fuel Volume (1-5)", "Inside Sales Pct (1-5)", "Fuel Brand (1-5)",
+        "Sales PSF (1-5)", "Lease Structure (1-5)", "Competition Score (1-5)",
+        "Membership Penetration (1-5)", "Fitness Format (1-5)", "Equip Lease Alignment (1-5)",
+        "Notes", "Caveats",
+    ]
+
+    # Whataburger QSR example — EBITDAR and Sales left blank for blind-mode demo
+    example = [
+        "2401 S Lamar Blvd", "Austin", "TX", "78704",
+        325000, None, None,
+        3200, 8, 2016, 0.85, None,
+        "NNN", 20, 12, "2036-12-31",
+        "10% every 5 years", "Y", "Whataburger Restaurants LLC",
+        38500, 18500, 87000, 195000,
+        92000, 88000, 86000,
+        "Austin-Round Rock-Georgetown TX", "Travis", "Urban",
+        1, 4, 0,
+        4, "N",
+        5, 4, 5,
+        None, None,
+        None, None, None,
+        None, None, None,
+        None, None, None,
+        None, None, None,
+        None, None, None,
+        "Hard corner · signalized intersection · Whataburger corporate · high-traffic corridor",
+        "Confirm rent bumps · verify corporate guarantee entity",
+    ]
+
+    hdr_fill  = PatternFill("solid", fgColor=INDIGO)
+    hdr_font  = Font(color=WHITE, bold=True, size=9, name="Calibri")
+    hdr_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    ex_fill   = PatternFill("solid", fgColor=LIGHT_GREY)
+    ex_font   = Font(size=9, name="Calibri")
+    ex_align  = Alignment(horizontal="left", vertical="center", wrap_text=False)
+
+    ws.row_dimensions[1].height = 36
+    ws.row_dimensions[2].height = 18
+
+    for col_idx, col_name in enumerate(columns, 1):
+        cell = ws.cell(row=1, column=col_idx, value=col_name)
+        cell.fill  = hdr_fill
+        cell.font  = hdr_font
+        cell.alignment = hdr_align
+
+    for col_idx, value in enumerate(example, 1):
+        cell = ws.cell(row=2, column=col_idx, value=value)
+        cell.fill  = ex_fill
+        cell.font  = ex_font
+        cell.alignment = ex_align
+
+    wide_cols  = {"Address", "MSA", "Notes", "Caveats", "Guarantor", "Rent Bumps"}
+    med_cols   = {"City", "County", "Lease Type", "Market Type", "Lease Expiration",
+                  "Avg HH Income 1 Mile", "Avg HH Income 3 Mile", "Avg HH Income 5 Mile"}
+    narrow_cols = {"State", "Zip Code", "Num Bays", "Corporate Guarantee (Y/N)",
+                   "Geo Constraint (Y/N)"}
+
+    for col_idx, col_name in enumerate(columns, 1):
+        letter = ws.cell(row=1, column=col_idx).column_letter
+        if col_name in wide_cols:
+            ws.column_dimensions[letter].width = 30
+        elif col_name in med_cols:
+            ws.column_dimensions[letter].width = 18
+        elif col_name in narrow_cols:
+            ws.column_dimensions[letter].width = 10
+        elif "(1-5)" in col_name or "(-1/0/1" in col_name:
+            ws.column_dimensions[letter].width = 16
+        else:
+            ws.column_dimensions[letter].width = 14
+
+    ws.freeze_panes = "A2"
+
+    # ── Column Guide sheet ─────────────────────────────────────────────────────
+    ws2 = wb.create_sheet("Column Guide")
+
+    for col_idx, label in enumerate(["Column Name", "Description", "Required"], 1):
+        cell = ws2.cell(row=1, column=col_idx, value=label)
+        cell.fill  = PatternFill("solid", fgColor=INDIGO)
+        cell.font  = Font(color=WHITE, bold=True, size=9, name="Calibri")
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    ws2.row_dimensions[1].height = 24
+
+    guide = [
+        ("Address",                    "Street address of the subject property",                                                                           "No"),
+        ("City",                       "City name",                                                                                                         "No"),
+        ("State",                      "Two-letter state abbreviation (e.g. TX)",                                                                           "No"),
+        ("Zip Code",                   "5-digit ZIP code",                                                                                                  "No"),
+        ("Annual Rent",                "Annual base rent in dollars",                                                                                       "Yes"),
+        ("EBITDAR",                    "Earnings before interest, taxes, D&A and rent. Leave blank to use financial-blind scoring.",                         "No"),
+        ("Sales",                      "Unit-level gross revenue. Leave blank to use financial-blind scoring.",                                              "No"),
+        ("Building SF",                "Gross building square footage. Default: 12,000",                                                                    "No"),
+        ("Store Age",                  "Age of the building in years. Default: 20",                                                                         "No"),
+        ("Year Built",                 "Year the building was constructed",                                                                                 "No"),
+        ("Lot Size (Acres)",           "Land area in acres",                                                                                                "No"),
+        ("Num Bays",                   "Number of service bays (automotive asset class only)",                                                              "No"),
+        ("Lease Type",                 "e.g. NNN, Absolute NNN, Modified Gross",                                                                           "No"),
+        ("Lease Term (Years)",         "Original lease term length in years",                                                                               "No"),
+        ("Lease Remaining (Years)",    "Years remaining on the primary term",                                                                               "No"),
+        ("Lease Expiration",           "Lease expiration date in YYYY-MM-DD format",                                                                        "No"),
+        ("Rent Bumps",                 "Description of scheduled rent increases (e.g. '10% every 5 years')",                                                "No"),
+        ("Corporate Guarantee (Y/N)",  "Y if the lease carries a corporate guarantee, N if personal only",                                                  "No"),
+        ("Guarantor",                  "Legal entity providing the lease guarantee",                                                                        "No"),
+        ("AADT",                       "Annual Average Daily Traffic count on the fronting road. Leave 0 if unknown.",                                       "No"),
+        ("Pop 1 Mile",                 "Total population within a 1-mile radius",                                                                           "No"),
+        ("Pop 3 Mile",                 "Total population within a 3-mile radius",                                                                           "No"),
+        ("Pop 5 Mile",                 "Total population within a 5-mile radius. Used directly by the scoring formula.",                                     "No"),
+        ("Avg HH Income 1 Mile",       "Average household income within a 1-mile radius",                                                                   "No"),
+        ("Avg HH Income 3 Mile",       "Average household income within a 3-mile radius",                                                                   "No"),
+        ("Avg HH Income 5 Mile",       "Average household income within a 5-mile radius. Used directly by the scoring formula.",                            "No"),
+        ("MSA",                        "Metropolitan statistical area name (e.g. 'Austin-Round Rock-Georgetown TX')",                                        "No"),
+        ("County",                     "County name",                                                                                                       "No"),
+        ("Market Type",                "Urban, Suburban, or Rural",                                                                                         "No"),
+        ("Site Override (-1/0/1/2)",   "-1 mid-block/poor visibility · 0 standard pad · +1 hard corner signalized · +2 outparcel anchor-adjacent",          "No"),
+        ("Access Score (1-5)",         "Site ingress/egress quality: 1 poor single cut, 3 standard, 5 multiple signalized cuts with turn lane. Default: 3", "No"),
+        ("Loc Override (-1/0/1)",      "Trade area context: -1 warehouse/low car ownership · 0 standard · +1 strong co-tenancy or captive corridor",        "No"),
+        ("Infill Score (1-5)",         "Supply constraint: 1 greenfield open land · 3 established corridor · 5 irreplaceable infill. Default: 3",           "No"),
+        ("Geo Constraint (Y/N)",       "Y if physical geography permanently prevents competitive development (mountain town, coastal peninsula, etc.)",       "No"),
+        ("Brand Tier (1-5)",           "QSR / Dollar Store blind-mode: brand strength 1-5. Used when EBITDAR and Sales are not provided.",                   "No"),
+        ("Drive Thru Score (1-5)",     "QSR: drive-thru format quality. 5 = double lane or pickup + DT",                                                   "No"),
+        ("Guarantee Score (1-5)",      "QSR blind-mode: guarantor credit quality. 5 = corporate investment grade",                                          "No"),
+        ("AUV vs Brand (1-5)",         "QSR normal-mode: AUV relative to brand average. 3 = at average, 5 = >130% of brand AUV",                           "No"),
+        ("Operator Score (1-5)",       "QSR normal-mode: operator size and track record. 5 = corporate owned",                                              "No"),
+        ("Membership Pct (1-5)",       "Car Wash: EFT membership penetration. 5 = >60% membership",                                                        "No"),
+        ("Wash Format (1-5)",          "Car Wash: format quality. 1 = self-serve, 5 = express exterior conveyor, new build",                                "No"),
+        ("Daily Volume (1-5)",         "Car Wash: cars washed per day. 5 = >300/day average",                                                               "No"),
+        ("Medical Specialty (1-5)",    "Medical: specialty and buildout stickiness. 5 = cancer center or hospital affiliate",                               "No"),
+        ("Payer Mix (1-5)",            "Medical: payer quality. 1 = >80% Medicaid, 5 = >70% commercial insured",                                           "No"),
+        ("TI Investment (1-5)",        "Medical: tenant improvement per SF. 1 = <$50/SF, 5 = >$350/SF hospital-grade",                                      "No"),
+        ("Fuel Volume (1-5)",          "Convenience: monthly fuel volume. 1 = <50k gal/month, 5 = >300k gal/month",                                        "No"),
+        ("Inside Sales Pct (1-5)",     "Convenience: inside sales quality. 5 = proprietary food program, >30% of revenue",                                  "No"),
+        ("Fuel Brand (1-5)",           "Convenience: fuel brand strength. 1 = unbranded, 5 = Wawa/Buc-ee's tier",                                          "No"),
+        ("Sales PSF (1-5)",            "Dollar Store: sales per square foot. 1 = <$120/SF, 5 = >$260/SF",                                                   "No"),
+        ("Lease Structure (1-5)",      "Dollar Store: expense responsibility. 1 = gross lease, 5 = absolute NNN + corporate guarantee + bumps",             "No"),
+        ("Competition Score (1-5)",    "Dollar Store: competitive density. 1 = 2+ competitors within 1 mile, 5 = dominant in underserved market",           "No"),
+        ("Membership Penetration (1-5)", "Fitness: active member count. 1 = <500, 5 = >4,000 or wait list",                                                "No"),
+        ("Fitness Format (1-5)",       "Fitness: format differentiation. 5 = unique format with high switching cost (boutique, medical fitness)",           "No"),
+        ("Equip Lease Alignment (1-5)","Fitness: lease term vs equipment life. 5 = long lease where equipment replacement is prohibitively expensive",      "No"),
+        ("Notes",                      "Broker notes — key positives, observations from site visit or deal context",                                        "No"),
+        ("Caveats",                    "Items to verify — diligence flags, open questions, conditions to confirm before closing",                            "No"),
+    ]
+
+    base_font  = Font(size=9, name="Calibri")
+    req_yes    = Font(size=9, name="Calibri", bold=True, color=GREEN)
+    req_no     = Font(size=9, name="Calibri", color=GREY_TEXT)
+    row_fill   = PatternFill("solid", fgColor=LIGHT_GREY)
+    wrap_align = Alignment(vertical="top", wrap_text=True)
+
+    for row_idx, (name, desc, req) in enumerate(guide, 2):
+        fill = row_fill if row_idx % 2 == 0 else None
+        for col_idx, val in enumerate([name, desc, req], 1):
+            cell = ws2.cell(row=row_idx, column=col_idx, value=val)
+            cell.font = req_yes if (col_idx == 3 and req == "Yes") else \
+                        req_no  if col_idx == 3 else base_font
+            cell.alignment = wrap_align
+            if fill:
+                cell.fill = fill
+        ws2.row_dimensions[row_idx].height = 28
+
+    ws2.column_dimensions["A"].width = 26
+    ws2.column_dimensions["B"].width = 70
+    ws2.column_dimensions["C"].width = 10
+    ws2.freeze_panes = "A2"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
 
 st.set_page_config(
     page_title="YAFC Deal Scorer",
@@ -1422,6 +1621,13 @@ with tab_upload:
 | `Infill Score` | 3 | Optional — 1 to 5 (Automotive only) |
 | `Geo Constraint` | FALSE | Optional |
         """)
+
+    st.download_button(
+        "Download Excel Template",
+        data=_build_template(),
+        file_name="YAFC_Scoring_Template.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
     uploaded_file = st.file_uploader(
         "Excel or CSV file",
