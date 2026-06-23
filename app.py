@@ -72,13 +72,13 @@ hr { border-color: #EAECEF !important; }
 
 # ── Header bar ─────────────────────────────────────────────────────────────
 st.markdown(
-    '<div style="background:#1D1740;padding:0.85rem 2.5rem;'
-    'margin:-5rem -5rem 2rem -5rem;">'
-    '<span style="color:#ffffff;font-size:1.05rem;font-weight:600;'
-    'letter-spacing:-0.01em;">YAFC Deal Scorer</span>'
-    '<span style="color:rgba(255,255,255,0.4);font-size:0.68rem;'
-    'letter-spacing:0.09em;text-transform:uppercase;margin-left:1.5rem;">'
-    'Cushman &amp; Wakefield &nbsp;&middot;&nbsp; Net Lease Underwriting</span>'
+    '<div style="padding:2rem 0 1.5rem 0;">'
+    '<p style="font-size:2.2rem;font-weight:700;color:#1D1740;'
+    'letter-spacing:-0.03em;margin:0;line-height:1.1;">YAFC Intelligence</p>'
+    '<p style="font-size:0.85rem;color:#6B7280;margin:0.4rem 0 0 0;'
+    'letter-spacing:0.01em;">'
+    'Net Lease Deal Scoring &nbsp;&mdash;&nbsp; Cushman &amp; Wakefield Capital Markets'
+    '</p>'
     '</div>',
     unsafe_allow_html=True,
 )
