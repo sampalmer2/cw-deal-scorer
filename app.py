@@ -4,7 +4,7 @@ from scorer import score_property, MODULES, FORMULA_VERSION
 from database import (
     init_db, save_property, save_outcome,
     get_all_scores, get_accuracy_metrics, get_disagreements,
-    get_outcomes_for_analysis, find_similar_deals,
+    get_outcomes_for_analysis, find_similar_deals, load_all_for_chat,
 )
 import urllib.parse
 import io
@@ -2221,3 +2221,139 @@ with tab_intel:
                             f'{analysis}</div>',
                             unsafe_allow_html=True,
                         )
+
+        # ── SECTION 3 — Ask the Database ─────────────────────────────────────
+        st.divider()
+        st.markdown("### Ask the Database")
+
+        # Load full DB into session_state once per session; refreshable
+        if '_chat_db' not in st.session_state:
+            try:
+                st.session_state['_chat_db'] = load_all_for_chat()
+            except Exception as _e:
+                st.session_state['_chat_db'] = []
+                st.error(f"Could not load database: {_e}")
+
+        _chat_db_rows = st.session_state.get('_chat_db', [])
+        n_total = len(_chat_db_rows)
+
+        note_col, refresh_col = st.columns([6, 1])
+        with note_col:
+            st.caption(
+                f"Analyzing **{n_total}** total scored deal{'s' if n_total != 1 else ''} "
+                f"across all record types."
+            )
+        with refresh_col:
+            if st.button("Refresh", key="_chat_refresh", use_container_width=True):
+                st.session_state.pop('_chat_db', None)
+                st.session_state.pop('_chat_history', None)
+                st.rerun()
+
+        _ai_ready = _ANTHROPIC_OK and ("ANTHROPIC_API_KEY" in st.secrets)
+
+        if not _ai_ready:
+            st.warning(
+                "Add `ANTHROPIC_API_KEY` to Streamlit secrets to enable AI chat."
+                if _ANTHROPIC_OK else
+                "The `anthropic` package is not installed."
+            )
+        else:
+            # Build compact DB string for the system prompt (cap at 300 rows)
+            _cap = min(300, n_total)
+            _db_lines = []
+            for _r in _chat_db_rows[:_cap]:
+                _cap_rate = (
+                    f"{float(_r['close_cap_rate'])*100:.2f}%"
+                    if _r.get('close_cap_rate') else "—"
+                )
+                _rent = (
+                    f"${float(_r['annual_rent']):,.0f}"
+                    if _r.get('annual_rent') else "—"
+                )
+                _thesis = (_r.get('broker_thesis') or "—")[:120]
+                _db_lines.append(
+                    f"{_r.get('property_name','?')}, {_r.get('city','?')} {_r.get('state','?')} | "
+                    f"{_r.get('asset_class','?')} | "
+                    f"Grade: {_r.get('formula_grade','?')} | "
+                    f"Broker: {_r.get('broker_grade') or 'agreed'} | "
+                    f"Rent: {_rent} | Cap: {_cap_rate} | "
+                    f"Status: {_r.get('deal_status') or '—'} | "
+                    f"Override: {_r.get('override_reason') or '—'} | "
+                    f"Thesis: {_thesis} | "
+                    f"Type: {_r.get('record_type','?')} | "
+                    f"Scored: {str(_r.get('scored_at','?'))[:10]} | "
+                    f"By: {_r.get('scored_by') or '—'} | "
+                    f"Portfolio: {_r.get('portfolio_name') or '—'}"
+                )
+            _db_context = "\n".join(_db_lines)
+            if n_total > _cap:
+                _db_context += f"\n[{n_total - _cap} older records not shown]"
+
+            _system_prompt = (
+                "You are an expert net lease capital markets analyst for the "
+                "YAFC Leased Investment Team at Cushman & Wakefield. "
+                "You have access to the team's proprietary deal scoring database. "
+                "Answer questions accurately and concisely. "
+                "When referencing specific deals, cite the property name, city, and grade. "
+                "If the data doesn't contain enough information to answer, "
+                "say so clearly rather than guessing.\n\n"
+                f"Current database ({n_total} total records):\n{_db_context}"
+            )
+
+            # Chat history
+            if '_chat_history' not in st.session_state:
+                st.session_state['_chat_history'] = []
+            _chat_history = st.session_state['_chat_history']
+
+            # Display last 5 exchanges (10 messages) above the input
+            if _chat_history:
+                for _msg in _chat_history[-10:]:
+                    with st.chat_message(_msg['role']):
+                        st.markdown(_msg['content'])
+
+                if st.button("Clear chat", key="_clear_chat"):
+                    st.session_state['_chat_history'] = []
+                    st.rerun()
+
+            # Input form — clear_on_submit resets the text box after each ask
+            with st.form("chat_form", clear_on_submit=True):
+                _q_col, _btn_col = st.columns([5, 1])
+                with _q_col:
+                    _chat_q = st.text_input(
+                        "Question",
+                        placeholder="e.g. Which QSR deals had broker overrides and why?",
+                        label_visibility="collapsed",
+                    )
+                with _btn_col:
+                    _chat_submitted = st.form_submit_button(
+                        "Ask", type="primary", use_container_width=True
+                    )
+
+            if _chat_submitted and _chat_q.strip():
+                _question = _chat_q.strip()
+
+                # Include last 4 exchanges (8 messages) for continuity
+                _api_messages = [
+                    {"role": _m['role'], "content": _m['content']}
+                    for _m in _chat_history[-8:]
+                ]
+                _api_messages.append({"role": "user", "content": _question})
+
+                with st.spinner("Thinking…"):
+                    try:
+                        _client = _anthropic.Anthropic(
+                            api_key=st.secrets["ANTHROPIC_API_KEY"]
+                        )
+                        _resp = _client.messages.create(
+                            model="claude-sonnet-4-6",
+                            max_tokens=1000,
+                            system=_system_prompt,
+                            messages=_api_messages,
+                        )
+                        _answer = _resp.content[0].text
+                        _chat_history.append({"role": "user",      "content": _question})
+                        _chat_history.append({"role": "assistant", "content": _answer})
+                        st.session_state['_chat_history'] = _chat_history
+                        st.rerun()
+                    except Exception as _e:
+                        st.error(f"AI request failed: {_e}")

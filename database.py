@@ -267,6 +267,34 @@ def log_score_change(score_id: int, changed_by: str, field_changed: str,
         conn.commit()
 
 
+def load_all_for_chat() -> list[dict]:
+    """Return all scored records with the columns needed for AI chat context."""
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT
+                    address          AS property_name,
+                    city,
+                    state,
+                    asset_class,
+                    formula_grade,
+                    broker_grade,
+                    annual_rent,
+                    close_cap_rate,
+                    override_reason,
+                    broker_thesis,
+                    deal_status,
+                    buyer_type,
+                    scored_at::date  AS scored_at,
+                    scored_by,
+                    record_type,
+                    portfolio_name
+                FROM scores
+                ORDER BY scored_at DESC
+            """)
+            return [dict(r) for r in cur.fetchall()]
+
+
 def find_similar_deals(asset_class: str, grade: str = None, state: str = None,
                        rent_min: float = None, rent_max: float = None) -> list[dict]:
     """Return live scored deals matching the given filters, newest first."""
