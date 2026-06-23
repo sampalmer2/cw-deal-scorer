@@ -963,20 +963,30 @@ with tab_score:
                 elif asset_class == 'qsr':
                     cb5, cb6, cb7 = st.columns(3)
                     with cb5:
-                        st.caption("Brand Tier — S5")
-                        brand_tier = st.select_slider(
-                            "Brand Tier QSR",
-                            options=[1, 2, 3, 4, 5],
-                            value=3,
-                            format_func=lambda x: {
-                                1: "1 — Struggling or declining brand",
-                                2: "2 — Regional / secondary brand",
-                                3: "3 — Established national brand",
-                                4: "4 — Top-tier national brand",
-                                5: "5 — Dominant brand — McDonald's, Chick-fil-A tier",
-                            }[x],
-                            label_visibility="collapsed",
+                        st.caption("Brand & Market Presence — S5")
+                        brand_name = st.selectbox(
+                            "Brand",
+                            ["Whataburger", "McDonald's", "Chick-fil-A", "Dutch Bros",
+                             "Raising Cane's", "Shake Shack", "Five Guys", "Other"],
+                            key="qsr_brand_name",
                         )
+                        brand_market = st.selectbox(
+                            "Brand presence in this market",
+                            ["Home market — dominant regional brand",
+                             "Strong national presence — top 3 in market",
+                             "Standard national presence",
+                             "Expansion market — limited locations",
+                             "Minimal presence — new or rare in market"],
+                            key="qsr_brand_market",
+                        )
+                        brand_tier = {
+                            "Home market — dominant regional brand":    5,
+                            "Strong national presence — top 3 in market": 4,
+                            "Standard national presence":               3,
+                            "Expansion market — limited locations":     2,
+                            "Minimal presence — new or rare in market": 1,
+                        }[brand_market]
+                        st.caption(f"Brand Tier → **{brand_tier} / 5** — brand strength varies by market")
                     with cb6:
                         st.caption("Drive-Thru — S6")
                         drive_thru_score = st.select_slider(
@@ -1371,10 +1381,19 @@ with tab_score:
             st.warning(f"Scoring Mode: **{scoring_mode}** — No unit-level financials; using market/brand signals")
 
         # Grade, pool, total score
-        g1, g2, g3, _ = st.columns([1, 2, 2, 4])
-        g1.metric("Grade",       result['Grade'])
-        g2.metric("Pool",        result['Pool'])
-        g3.metric("Total Score", f"{result['Total Score']} / 40")
+        fine_grade = result.get('Fine Grade', result['Grade'])
+        if asset_class == 'qsr':
+            g1, g2, g3, g4, _ = st.columns([1, 1, 2, 2, 3])
+            g1.metric("Fine Grade",    fine_grade,
+                      help="5-tier QSR grade: A, A/B, B, B/C, C")
+            g2.metric("Grade (A/B/C)", result['Grade'])
+            g3.metric("Pool",        result['Pool'])
+            g4.metric("Total Score", f"{result['Total Score']} / 40")
+        else:
+            g1, g2, g3, _ = st.columns([1, 2, 2, 4])
+            g1.metric("Grade",       result['Grade'])
+            g2.metric("Pool",        result['Pool'])
+            g3.metric("Total Score", f"{result['Total Score']} / 40")
 
         st.divider()
 
@@ -1720,7 +1739,8 @@ with tab_upload:
                     'pop_5m':         _rfloat(row, 'Pop 5 Mile', 'Pop 5Mi', default=50000),
                     'income_5m':      _rfloat(row, 'Avg HH Income 5 Mile', 'Income 5Mi', default=90000),
                     'aadt':           _rfloat(row, 'AADT', default=0),
-                    'lease_score':    _rint(row, 'Lease Score', default=3),
+                    'lease_score':     _rint(row,   'Lease Score', default=3),
+                    'lease_remaining': _rfloat(row, 'Lease Remaining (Years)', default=0),
                     'site_override':  _rint(row, 'Site Override (-1/0/1/2)', 'Site Override', default=0),
                     'access_score':   _rint(row, 'Access Score (1-5)', 'Access Score', default=3),
                     'loc_override':   _rint(row, 'Loc Override (-1/0/1)', 'Loc Override', default=0),
@@ -1768,6 +1788,7 @@ with tab_upload:
                 row_out.update(s_scores)
                 row_out['Total Score'] = scored['Total Score']
                 row_out['Grade']       = scored['Grade']
+                row_out['Fine Grade']  = scored.get('Fine Grade', scored['Grade'])
                 row_out['Pool']        = scored['Pool']
 
                 results.append(row_out)

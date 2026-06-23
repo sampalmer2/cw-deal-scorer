@@ -67,14 +67,17 @@ MODULES = {
 
 def score_property(p):
 
-    # ── Financial data extraction ────────────────────────────────────────────
+    # ── Core inputs needed early (S1 uses asset_class and sf for QSR) ───────
     ebitdar              = float(p.get('ebitdar', 0) or 0)
     annual_rent          = float(p.get('annual_rent', 0) or 0)
     sales                = float(p.get('sales', 0) or 0)
     financials_available = p.get('financials_available', True)
+    sf                   = float(p.get('sf', 12000) or 12000)
+    asset_class          = p.get('asset_class', 'automotive_service')
+    module               = MODULES.get(asset_class, MODULES['automotive_service'])
 
     # ── S1: Financial Signal — auto-detect scoring mode ──────────────────────
-    # Priority: Coverage Ratio > Rent/Sales > Financial Blind
+    # Priority: Coverage Ratio > Rent/Sales > QSR Rent PSF > Financial Blind
     e2r = None
     if ebitdar > 0 and annual_rent > 0:
         e2r = ebitdar / annual_rent
@@ -85,6 +88,12 @@ def score_property(p):
         s1 = 5 if r2s_s1 <= 0.06 else 4 if r2s_s1 <= 0.08 else \
              3 if r2s_s1 <= 0.10 else 2 if r2s_s1 <= 0.12 else 1
         scoring_mode = 'Rent/Sales Ratio'
+    elif asset_class == 'qsr' and annual_rent > 0 and sf > 0:
+        # High rent PSF = premium infill location for QSR (inverted from credit logic)
+        rent_psf = annual_rent / sf
+        s1 = 5 if rent_psf >= 100 else 4 if rent_psf >= 70 else \
+             3 if rent_psf >= 50  else 2 if rent_psf >= 35  else 1
+        scoring_mode = 'Rent PSF'
     else:
         # rent_vs_market: -2 to +2 maps to 1-5
         rent_vs_market = p.get('rent_vs_market', 0)
@@ -94,21 +103,22 @@ def score_property(p):
     # financial_blind: True when no financials provided OR mode auto-detected blind
     financial_blind = (not financials_available) or (scoring_mode == 'Financial Blind')
 
-    # ── Asset class (needed by S3a and module sections) ─────────────────────
-    asset_class = p.get('asset_class', 'automotive_service')
-    module      = MODULES.get(asset_class, MODULES['automotive_service'])
-
-    # ── S2: Lease Quality (broker judgment) ───────────────────────────────────
-    # 5 = 15+ yrs, corporate guarantee, >=10% bumps
-    # 4 = 10-15 yrs, corporate guarantee, standard bumps
-    # 3 = 7-10 yrs or franchisee / subsidiary guarantee
-    # 2 = 5-7 yrs or weak guarantee structure
-    # 1 = <5 yrs remaining or personal guarantee only
-    s2 = p.get('lease_score', 3)
+    # ── S2: Lease Quality ────────────────────────────────────────────────────
+    # When lease_remaining is provided compute from term; else use broker input.
+    # Tighter thresholds differentiate the 9-15 year band:
+    #   15+ = 5, 12-15 = 4, 9-12 = 3, 7-9 = 2, <7 = 1
+    lease_remaining = float(p.get('lease_remaining', 0) or 0)
+    if lease_remaining > 0:
+        if lease_remaining >= 15:   s2 = 5
+        elif lease_remaining >= 12: s2 = 4
+        elif lease_remaining >= 9:  s2 = 3
+        elif lease_remaining >= 7:  s2 = 2
+        else:                       s2 = 1
+    else:
+        s2 = p.get('lease_score', 3)
 
     # ── S3a: Physical Asset Quality (SF thresholds are asset-class aware) ─────
     base = 3
-    sf   = p.get('sf', 12000)
     age  = p.get('age', 20)
 
     if asset_class == 'qsr':
@@ -175,7 +185,6 @@ def score_property(p):
         )))
 
     # ── Asset Class Module (S5, S6, S7) ─────────────────────────────────────
-
     if asset_class == 'automotive_service':
         if not financial_blind and ebitdar > 0 and sales > 0:
             m   = ebitdar / sales
@@ -265,9 +274,33 @@ def score_property(p):
 
     total = s1 + s2 + s3a + s3b + s4 + s5 + s6 + s7
     grade = 'A' if total >= 28 else 'B' if total >= 19 else 'C'
-    pool  = 'Launch Pool'   if grade == 'A' else \
-            'Holdback Pool' if grade == 'B' else \
-            'Yield Pool'
+
+    # QSR population floor: sub-10K market without captive geography can't grade A or B
+    if asset_class == 'qsr' and pop < 10000 and not geo_constraint:
+        grade = 'C'
+
+    # Five-tier fine grade (QSR only; others keep standard A/B/C)
+    if asset_class == 'qsr':
+        if total >= 28:    fine_grade = 'A'
+        elif total >= 26:  fine_grade = 'A/B'
+        elif total >= 22:  fine_grade = 'B'
+        elif total >= 19:  fine_grade = 'B/C'
+        else:              fine_grade = 'C'
+    else:
+        fine_grade = grade
+
+    # Asset-class-aware pool assignment
+    if asset_class == 'qsr':
+        if grade == 'A' and annual_rent >= 200000:
+            pool = 'Yield Pool'       # high NOI — REIT and institutional target
+        elif grade == 'A':
+            pool = 'Launch Pool'      # strong asset, private capital
+        elif grade == 'B':
+            pool = 'Holdback Pool'
+        else:
+            pool = 'Yield Pool'
+    else:
+        pool = 'Launch Pool' if grade == 'A' else 'Holdback Pool' if grade == 'B' else 'Yield Pool'
 
     result = {
         'S1 — Rent Coverage':         s1,
@@ -286,6 +319,7 @@ def score_property(p):
         'AADT Modifier':              aadt_mod,
         'Asset Class':                asset_class,
         'Scoring Mode':               scoring_mode,
+        'Fine Grade':                 fine_grade,
     }
 
     # Automotive financial ratios only when computed from real financials
