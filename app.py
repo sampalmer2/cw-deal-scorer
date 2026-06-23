@@ -56,21 +56,45 @@ if mode == "Score a Single Property":
 
         with col3:
             site_override = st.select_slider(
-                "Site Geometry (S4)",
+                "Physical Asset (S4a)",
                 options=[-1, 0, 1, 2],
                 value=0,
                 format_func=lambda x: {
-                    -1: "−1  Mid-block, poor visibility, limited access",
+                    -1: "−1  Mid-block, poor visibility",
                      0: " 0  Standard standalone pad",
-                     1: "+1  Hard corner, signalized intersection",
-                     2: "+2  Outparcel — anchor-adjacent, dual traffic"
+                     1: "+1  Hard corner, signalized",
+                     2: "+2  Outparcel — anchor-adjacent"
                 }[x]
             )
             st.caption(
-                "**+2 Outparcel:** Freestanding pad in front of or "
-                "adjacent to an established anchor (grocery, big box, "
-                "home improvement). Captures traffic from both the "
-                "road and the anchor. Tightest cap rates in the market."
+                "**+2 Outparcel:** Freestanding pad in front of "
+                "an established anchor. Tightest cap rates. "
+                "**−1:** Buried in strip center, limited road visibility."
+            )
+
+            access_score = st.select_slider(
+                "Site Access Quality (S4b)",
+                options=[1, 2, 3, 4, 5],
+                value=3,
+                format_func=lambda x: {
+                    1: "1 — Poor · single cut, no signal, "
+                       "blocks street when queued",
+                    2: "2 — Limited · right-in/right-out only "
+                       "or shared access",
+                    3: "3 — Standard · one or two cuts, "
+                       "acceptable flow",
+                    4: "4 — Good · signalized or multiple "
+                       "full-movement cuts",
+                    5: "5 — Excellent · multiple cuts, dedicated "
+                       "turn lane, easy truck access"
+                }[x]
+            )
+            st.caption(
+                "Check on Google Maps Street View. "
+                "Look for: number of curb cuts, signal vs. "
+                "stop sign, stacking room, truck turning radius. "
+                "A tire shop with poor access loses customers "
+                "before they park."
             )
 
         with col4:
@@ -169,6 +193,7 @@ if mode == "Score a Single Property":
             'pop_5m':         pop_5m,
             'income_5m':      income_5m,
             'site_override':  site_override,
+            'access_score':   access_score,
             'loc_override':   loc_override,
             'infill_score':   infill_score,
             'aadt':           aadt,
@@ -192,7 +217,7 @@ if mode == "Score a Single Property":
         st.divider()
         st.markdown("#### Score Breakdown")
         breakdown = {k: v for k, v in result.items() if k.startswith('S')}
-        cols = st.columns(6)
+        cols = st.columns(7)
         for i, (label, score) in enumerate(breakdown.items()):
             color = "green" if score >= 4 else "orange" if score == 3 else "red"
             cols[i].markdown(
@@ -252,7 +277,8 @@ else:
 | `Pop 5Mi` | 123456 | Optional — defaults to 50,000 |
 | `Income 5Mi` | 95000 | Optional — defaults to 90,000 |
 | `AADT` | 32000 | Optional — fronting road traffic count, 0 if unknown |
-| `Site Override` | 0 | Optional — −1, 0, +1, or +2 for outparcel |
+| `Site Override` | 0 | Optional — −1, 0, +1, or +2 for outparcel (S4a) |
+| `Access Score` | 3 | Optional — 1 through 5 (S4b site access) |
 | `Loc Override` | 0 | Optional — −1, 0, or +1 |
 | `Infill Score` | 3 | Optional — 1 through 5 |
 | `Geo Constraint` | FALSE | Optional — TRUE if geography permanently prevents competition |
@@ -290,6 +316,7 @@ else:
                     'income_5m':     float(row.get('Income 5Mi', 90000)),
                     'aadt':           float(row.get('AADT', 0)),
                     'site_override':  int(row.get('Site Override', 0)),
+                    'access_score':   int(row.get('Access Score', 3)),
                     'loc_override':   int(row.get('Loc Override', 0)),
                     'infill_score':   int(row.get('Infill Score', 3)),
                     'geo_constraint': bool(row.get('Geo Constraint', False)),
@@ -306,7 +333,8 @@ else:
                     'S1 Coverage':    scored['S1 — EBITDAR Coverage'],
                     'S2 Margin':      scored['S2 — EBITDAR Margin'],
                     'S3 Performance': scored['S3 — Store Performance'],
-                    'S4 Real Estate': scored['S4 — Real Estate'],
+                    'S4a Physical':   scored['S4a — Physical Asset'],
+                    'S4b Access':     scored['S4b — Site Access'],
                     'S5 Location':    scored['S5 — Location'],
                     'S6 Infill':      scored['S6 — Infill & Supply'],
                     'Total Score':    scored['Total Score'],

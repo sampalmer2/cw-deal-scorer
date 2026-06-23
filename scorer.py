@@ -14,9 +14,9 @@ def score_property(p):
          4 if (r2s<=0.07 and p['sales']>=3e6) else \
          3 if r2s<=0.085 else 2 if r2s<=0.10 else 1
 
-    # S4: Real Estate Quality
+    # S4a: Physical Asset Quality
     # Fee simple baseline = 3
-    # Adjusted for SF, age, and site geometry
+    # Adjusted for SF, age
     # site_override: -1 mid-block / 0 standard / +1 hard corner / +2 outparcel
     base = 3
     sf  = p.get('sf', 12000)
@@ -26,7 +26,19 @@ def score_property(p):
     if age <= 10:    base += 1
     elif age >= 30:  base -= 1
     base += p.get('site_override', 0)
-    s4 = max(1, min(5, base))
+    s4a = max(1, min(5, base))
+
+    # S4b: Site Access Quality
+    # Pure broker judgment from Maps check or site visit
+    # 5 = Multiple full-movement cuts, signalized,
+    #     dedicated turn lane, easy truck/trailer access
+    # 4 = Good access, signalized or multiple cuts
+    # 3 = Standard — one or two cuts, acceptable flow
+    # 2 = Limited — right-in/right-out only,
+    #     shared access, or high speed road
+    # 1 = Poor — single cut, no signal, difficult
+    #     truck access, stacking blocks street
+    s4b = p.get('access_score', 3)
 
     # S5: Location / Demographics + AADT + Geographic Constraint
     pop = p.get('pop_5m', 50000)
@@ -66,11 +78,9 @@ def score_property(p):
     else:
         s6 = infill_score
 
-    total = s1 + s2 + s3 + s4 + s5 + s6
+    total = s1 + s2 + s3 + s4a + s4b + s5 + s6
 
-    # Grade thresholds adjusted for 6 criteria (max 32 with outparcel +2)
-    # A = top tier, B = mid tier, C = yield
-    grade = 'A' if total >= 24 else 'B' if total >= 16 else 'C'
+    grade = 'A' if total >= 28 else 'B' if total >= 19 else 'C'
     pool  = 'Launch Pool'   if grade == 'A' else \
             'Holdback Pool' if grade == 'B' else \
             'Yield Pool'
@@ -79,7 +89,8 @@ def score_property(p):
         'S1 — EBITDAR Coverage':  s1,
         'S2 — EBITDAR Margin':    s2,
         'S3 — Store Performance': s3,
-        'S4 — Real Estate':       s4,
+        'S4a — Physical Asset':   s4a,
+        'S4b — Site Access':      s4b,
         'S5 — Location':          s5,
         'S6 — Infill & Supply':   s6,
         'Total Score':            total,
