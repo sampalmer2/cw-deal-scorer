@@ -328,10 +328,12 @@ else:
             label="⬇️ Download Scored Results as Excel",
             data=output,
             file_name="YAFC_Scored_Portfolio.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            mime="application/vnd.openxmlformats-officedocument"
+                 ".spreadsheetml.sheet"
         )
 
         if errors:
             with st.expander(f"⚠️ {len(errors)} rows had errors"):
                 for e in errors:
                     st.write(e)
+                    
