@@ -44,13 +44,13 @@ def _build_template() -> io.BytesIO:
         "Notes", "Caveats",
     ]
 
-    # Whataburger QSR example — EBITDAR and Sales left blank for blind-mode demo
+    # Generic QSR example — EBITDAR and Sales left blank for blind-mode demo
     example = [
-        "2401 S Lamar Blvd", "Austin", "TX", "qsr", "78704",
+        "123 Main Street", "Austin", "TX", "qsr", "78704",
         325000, None, None,
         3200, 8, 2016, 0.85, None,
         "NNN", 20, 12, "2036-12-31",
-        "10% every 5 years", "Y", "Whataburger Restaurants LLC",
+        "10% every 5 years", "Y", "Example Tenant LLC",
         38500, 18500, 87000, 195000,
         92000, 88000, 86000,
         "Austin-Round Rock-Georgetown TX", "Travis", "Urban",
@@ -63,7 +63,7 @@ def _build_template() -> io.BytesIO:
         None, None, None,
         None, None, None,
         None, None, None,
-        "Hard corner · signalized intersection · Whataburger corporate · high-traffic corridor",
+        "Hard corner · signalized intersection · corporate lease · high-traffic corridor",
         "Confirm rent bumps · verify corporate guarantee entity",
     ]
 
@@ -1705,7 +1705,7 @@ with tab_upload:
     with name_col:
         portfolio_name = st.text_input(
             "Portfolio Name",
-            placeholder="e.g. Whataburger 2026 or Les Schwab Q3",
+            placeholder="e.g. QSR Portfolio 2026 or Automotive Q3",
             key="upload_portfolio_name",
         )
 
