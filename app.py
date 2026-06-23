@@ -74,22 +74,36 @@ if mode == "Score a Single Property":
             )
 
         with col4:
+            aadt = st.number_input(
+                "Traffic Count — AADT",
+                min_value=0,
+                value=0,
+                step=1000,
+                help="Annual Average Daily Traffic on the fronting road. "
+                     "Leave 0 if unknown — will not affect score."
+            )
+            if aadt >= 40000:
+                st.success(f"✅ {aadt:,} AADT — major arterial  (+1 to S5)")
+            elif aadt >= 20000:
+                st.info(f"ℹ️ {aadt:,} AADT — standard corridor  (no modifier)")
+            elif aadt >= 10000:
+                st.info(f"ℹ️ {aadt:,} AADT — secondary road  (no modifier)")
+            elif aadt > 0:
+                st.warning(f"⚠️ {aadt:,} AADT — low traffic  (−1 to S5)")
+
             loc_override = st.select_slider(
-                "Trade Area Quality (S5)",
+                "Trade Area Override (S5)",
                 options=[-1, 0, 1],
                 value=0,
                 format_func=lambda x: {
-                    -1: "−1  Warehouse district / very low car ownership",
-                     0: " 0  Standard suburban corridor",
-                     1: "+1  High AADT, strong co-tenancy, college town"
+                    -1: "−1  Warehouse / very low car ownership",
+                     0: " 0  Standard",
+                     1: "+1  Strong co-tenancy, college town"
                 }[x]
             )
             st.caption(
-                "**+1:** High daily traffic count on fronting road, "
-                "strong anchor co-tenancy, or college town with "
-                "car-dependent surrounding residential market. "
-                "**−1:** Daytime-only population, low vehicle ownership, "
-                "or warehouse/industrial corridor."
+                "AADT auto-adjusts S5. Use the override for "
+                "co-tenancy and car ownership factors."
             )
 
         with col5:
@@ -138,6 +152,7 @@ if mode == "Score a Single Property":
             'age':           age,
             'pop_5m':        pop_5m,
             'income_5m':     income_5m,
+            'aadt':          aadt,
             'site_override': site_override,
             'loc_override':  loc_override,
             'infill_score':  infill_score,
@@ -219,6 +234,7 @@ else:
 | `Store Age` | 8 | Optional — defaults to 20 |
 | `Pop 5Mi` | 123456 | Optional — defaults to 50,000 |
 | `Income 5Mi` | 95000 | Optional — defaults to 90,000 |
+| `AADT` | 32000 | Optional — fronting road traffic count, 0 if unknown |
 | `Site Override` | 0 | Optional — −1, 0, +1, or +2 for outparcel |
 | `Loc Override` | 0 | Optional — −1, 0, or +1 |
 | `Infill Score` | 3 | Optional — 1 through 5 |
@@ -254,6 +270,7 @@ else:
                     'age':           float(row.get('Store Age', 20)),
                     'pop_5m':        float(row.get('Pop 5Mi', 50000)),
                     'income_5m':     float(row.get('Income 5Mi', 90000)),
+                    'aadt':          float(row.get('AADT', 0)),
                     'site_override': int(row.get('Site Override', 0)),
                     'loc_override':  int(row.get('Loc Override', 0)),
                     'infill_score':  int(row.get('Infill Score', 3)),

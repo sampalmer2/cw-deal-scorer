@@ -28,17 +28,23 @@ def score_property(p):
     base += p.get('site_override', 0)
     s4 = max(1, min(5, base))
 
-    # S5: Location / Demographics
-    # 5-mile population and income averaged, adjusted for trade area quality
-    # loc_override: -1 warehouse/low car ownership / 0 standard / +1 high AADT/co-tenancy/college town
+    # S5: Location / Demographics + AADT modifier
     pop = p.get('pop_5m', 50000)
     inc = p.get('income_5m', 90000)
     ps  = 5 if pop>=200000 else 4 if pop>=100000 else \
           3 if pop>=50000  else 2 if pop>=20000  else 1
     ins = 5 if inc>=150000 else 4 if inc>=110000 else \
           3 if inc>=85000  else 2 if inc>=70000  else 1
+
+    # AADT modifier — auto-populated or manual override
+    aadt = p.get('aadt', 0)
+    if aadt >= 40000:             aadt_mod = 1
+    elif aadt < 10000 and aadt > 0: aadt_mod = -1
+    else:                         aadt_mod = 0
+
+    # Combine demographic score, trade area override, and AADT
     loc_override = p.get('loc_override', 0)
-    s5 = max(1, min(5, round((ps + ins) / 2) + loc_override))
+    s5 = max(1, min(5, round((ps + ins) / 2) + loc_override + aadt_mod))
 
     # S6: Infill & Supply Constraint
     # Pure broker judgment — no formula can calculate this
