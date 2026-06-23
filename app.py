@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from scorer import score_property, MODULES
+from scorer import score_property, MODULES, FORMULA_VERSION
 from database import (
     init_db, save_property, save_outcome,
     get_all_scores, get_accuracy_metrics, get_disagreements, get_outcomes_for_analysis,
@@ -1311,6 +1311,25 @@ with tab_score:
                 placeholder="Confirm lease term · check rent reset · verify anchor tenancy...",
             )
 
+        # ── Record type + formula version ────────────────────────────────────
+        rt_col, fv_col = st.columns([3, 1])
+        with rt_col:
+            record_type = st.radio(
+                "Record Type",
+                ["live", "calibration", "test"],
+                index=2,
+                horizontal=True,
+                help=(
+                    "**Live** — real C&W deal, feeds all learning loops. "
+                    "**Calibration** — portfolio bid or formula validation, "
+                    "excluded from outcome analysis. "
+                    "**Test** — dev/scratch, never included in any analysis."
+                ),
+            )
+        with fv_col:
+            st.caption("Formula Version")
+            st.markdown(f"`{FORMULA_VERSION}`")
+
         submitted = st.form_submit_button("Score This Property", type="primary")
 
     # ── Results ───────────────────────────────────────────────────────────────
@@ -1333,6 +1352,9 @@ with tab_score:
             'loc_override':       loc_override,
             'aadt':               aadt,
             'geo_constraint':     geo_constraint,
+            # Record metadata
+            'record_type':            record_type,
+            'formula_version':        FORMULA_VERSION,
             # Financial blind mode flags
             'financials_available':   financials_available,
             'rent_vs_market':         rent_vs_market,
@@ -1709,6 +1731,18 @@ with tab_upload:
             key="upload_portfolio_name",
         )
 
+    upload_record_type = st.radio(
+        "Record Type for this upload",
+        ["live", "calibration", "test"],
+        index=1,
+        horizontal=True,
+        help=(
+            "**Calibration** is the right choice for most portfolio uploads. "
+            "Choose **Live** only for real C&W active deal flow."
+        ),
+        key="upload_record_type",
+    )
+
     uploaded_file = st.file_uploader(
         "Excel or CSV file",
         type=["xlsx", "xls", "csv"],
@@ -1738,8 +1772,10 @@ with tab_upload:
                 row_ac = str(row.get('Asset Class', '')).strip()
                 prop_ac = row_ac if row_ac in MODULES else upload_asset_class
                 prop = {
-                    'portfolio_name': portfolio_name or None,
-                    'asset_class':    prop_ac,
+                    'portfolio_name':  portfolio_name or None,
+                    'record_type':     upload_record_type,
+                    'formula_version': FORMULA_VERSION,
+                    'asset_class':     prop_ac,
                     'address':        str(row.get('Address', '') or ''),
                     'city':           str(row.get('City', '') or ''),
                     'state':          str(row.get('State', '') or ''),

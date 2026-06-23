@@ -1,3 +1,5 @@
+FORMULA_VERSION = 'v1.1'
+
 MODULES = {
     'automotive_service': {
         'name':          'Automotive Service',

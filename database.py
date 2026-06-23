@@ -14,7 +14,7 @@ _COLS = [
     's1', 's2', 's3', 's4a', 's4b', 's5', 's6',
     'total_score', 'formula_grade', 'formula_pool',
     'broker_name', 'broker_grade', 'override_reason',
-    'notes', 'caveats', 'formula_version',
+    'notes', 'caveats', 'formula_version', 'record_type',
 ]
 
 
@@ -66,6 +66,11 @@ def init_db():
                     caveats          TEXT,
                     formula_version  TEXT
                 )
+            """)
+            # Migrations: add columns introduced after initial deploy
+            cur.execute("""
+                ALTER TABLE scores
+                    ADD COLUMN IF NOT EXISTS record_type VARCHAR(20) DEFAULT 'test'
             """)
         conn.commit()
 
@@ -124,7 +129,8 @@ def save_property(inputs: dict, result: dict, notes: str, caveats: str):
         'override_reason': None,
         'notes':           notes,
         'caveats':         caveats,
-        'formula_version': '2.0',
+        'formula_version': inputs.get('formula_version', 'v1.1'),
+        'record_type':     inputs.get('record_type', 'test'),
     }
 
     col_list = ', '.join(_COLS)
