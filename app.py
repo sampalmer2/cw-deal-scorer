@@ -365,6 +365,21 @@ with tab_score:
                 "switches S1 to Rent vs Market and S5/S6/S7 to market/brand signals."
             ),
         )
+    # Portfolio — outside form so checkbox toggles fields without form submit
+    pf_chk_col, pf_name_col, pf_id_col = st.columns([2, 2, 2])
+    with pf_chk_col:
+        is_portfolio_deal = st.checkbox("Part of a portfolio deal?", key="is_portfolio_deal")
+    if is_portfolio_deal:
+        with pf_name_col:
+            _portfolio_name = st.text_input("Portfolio Name", key="_portfolio_name")
+        with pf_id_col:
+            _portfolio_id = st.text_input("Portfolio ID (optional)",
+                                          placeholder="For grouping runs",
+                                          key="_portfolio_id")
+    else:
+        _portfolio_name = ""
+        _portfolio_id   = None
+
     module_info = MODULES[asset_class]
 
     # Blind mode variable defaults (overridden by form widgets when shown)
@@ -378,6 +393,12 @@ with tab_score:
     lease_term_vs_equipment = 3
 
     with st.form("property_form"):
+
+        scored_by = st.text_input(
+            "Scored By",
+            placeholder="e.g. Sam Palmer",
+            value="",
+        )
 
         # ── Property Details ─────────────────────────────────────────────────
         with st.container(border=True):
@@ -1298,8 +1319,26 @@ with tab_score:
                     sales_psf = lease_structure = competition_score = 3
                     membership_penetration = equip_lease_alignment = 3
 
-        # ── Notes and caveats ────────────────────────────────────────────────
-        col_n1, col_n2 = st.columns(2)
+        # ── Market Context ────────────────────────────────────────────────────
+        with st.container(border=True):
+            st.markdown("**Market Context**")
+            st.caption("Macro snapshot at time of scoring — used for portfolio and vintage analysis.")
+            mc1, mc2 = st.columns(2)
+            with mc1:
+                cap_rate_market = st.number_input(
+                    "Market Cap Rate (%)",
+                    min_value=0.0, max_value=20.0, value=0.0, step=0.05,
+                    help="Prevailing cap rate for this asset class in this market. Leave 0 if unknown.",
+                )
+            with mc2:
+                interest_rate_10yr = st.number_input(
+                    "10-Year Treasury (%)",
+                    min_value=0.0, max_value=20.0, value=0.0, step=0.05,
+                    help="Current 10-year Treasury yield at time of scoring. Leave 0 if unknown.",
+                )
+
+        # ── Notes, Caveats, Scoring Notes ────────────────────────────────────
+        col_n1, col_n2, col_n3 = st.columns(3)
         with col_n1:
             notes = st.text_area(
                 "Notes",
@@ -1309,6 +1348,11 @@ with tab_score:
             caveats = st.text_area(
                 "Caveats",
                 placeholder="Confirm lease term · check rent reset · verify anchor tenancy...",
+            )
+        with col_n3:
+            scoring_notes = st.text_area(
+                "Scoring Notes",
+                placeholder="Formula calibration context, assumptions, or session notes...",
             )
 
         # ── Record type + formula version ────────────────────────────────────
@@ -1386,14 +1430,23 @@ with tab_score:
             'membership_penetration':    membership_penetration,
             'fitness_format':            fitness_format,
             'equip_lease_alignment':     equip_lease_alignment,
+            # Session metadata
+            'scored_by':                 scored_by or None,
+            'is_portfolio_deal':         is_portfolio_deal,
+            'portfolio_name':            _portfolio_name or None,
+            'portfolio_id':              _portfolio_id or None,
+            'cap_rate_market':           cap_rate_market or None,
+            'interest_rate_10yr':        interest_rate_10yr or None,
+            'scoring_notes':             scoring_notes or None,
         }
         result = score_property(inputs)
         # Cache so the display + override section survive checkbox re-renders
         st.session_state['_last_score'] = {
-            'result':  result,
-            'inputs':  inputs,
-            'notes':   notes,
-            'caveats': caveats,
+            'result':        result,
+            'inputs':        inputs,
+            'notes':         notes,
+            'caveats':       caveats,
+            'scoring_notes': scoring_notes,
         }
         st.session_state.pop('_score_saved', None)
 
@@ -1403,8 +1456,8 @@ with tab_score:
     if _cached:
         result    = _cached['result']
         inputs    = _cached['inputs']
-        _notes    = _cached['notes']
-        _caveats  = _cached['caveats']
+        _notes   = _cached['notes']
+        _caveats = _cached['caveats']
         _addr     = inputs.get('address', '')
         _city     = inputs.get('city', '')
         _state    = inputs.get('state', '')
