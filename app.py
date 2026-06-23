@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from scorer import score_property
+from scorer import score_property, MODULES
 from database import init_db, save_property, load_all, load_summary
 import urllib.parse
 import io
@@ -19,7 +19,6 @@ st.markdown("""
 html, body, [class*="css"] {
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
 }
-/* Remove top padding — target multiple Streamlit container selectors across versions */
 .block-container,
 [data-testid="stMainBlockContainer"],
 [data-testid="stAppViewBlockContainer"] {
@@ -70,7 +69,7 @@ hr { border-color: #EAECEF !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Header bar ─────────────────────────────────────────────────────────────
+# ── Header ──────────────────────────────────────────────────────────────────
 st.markdown(
     '<div style="padding:2rem 0 1.5rem 0;">'
     '<p style="font-size:2.2rem;font-weight:700;color:#1D1740;'
@@ -99,9 +98,18 @@ tab_score, tab_dash, tab_upload = st.tabs([
 # ─────────────────────────────────────────────────────────────────────────────
 with tab_score:
 
+    # Asset class selector sits above the form so changing it re-renders inputs
+    asset_class = st.selectbox(
+        "Asset Class",
+        options=list(MODULES.keys()),
+        format_func=lambda x: MODULES[x]['name'],
+        key="asset_class_selector",
+    )
+    module_info = MODULES[asset_class]
+
     with st.form("property_form"):
 
-        # Property Details
+        # ── Property Details ─────────────────────────────────────────────────
         with st.container(border=True):
             st.markdown("**Property Details**")
             col1, col2 = st.columns(2)
@@ -115,7 +123,8 @@ with tab_score:
                                 min_value=0, value=900000, step=1000)
             with col2:
                 sales     = st.number_input("Sales ($)",
-                                min_value=0, value=4000000, step=10000)
+                                min_value=0, value=4000000, step=10000,
+                                help="Unit-level revenue. Required for Automotive; context for other modules.")
                 sf        = st.number_input("Building SF",
                                 min_value=0, value=12000, step=100)
                 age       = st.number_input("Store Age (years)",
@@ -125,17 +134,38 @@ with tab_score:
                 income_5m = st.number_input("5-Mile Median Income ($)",
                                 min_value=0, value=95000, step=1000)
 
-        # Broker Judgment
+        # ── Broker Judgment — Universal (S2, S3, S4) ────────────────────────
         with st.container(border=True):
-            st.markdown("**Broker Judgment**")
+            st.markdown("**Broker Judgment — Universal Criteria**")
             st.caption(
                 "Site visit or Maps check required. "
                 "These inputs capture what no database can."
             )
+
+            # S2: Lease Quality — full-width row above the three columns
+            lc1, lc2 = st.columns([1, 1])
+            with lc1:
+                st.caption("Lease Quality — S2")
+                lease_score = st.select_slider(
+                    "Lease Quality",
+                    options=[1, 2, 3, 4, 5],
+                    value=3,
+                    format_func=lambda x: {
+                        1: "1 — <5 yrs remaining or personal guarantee only",
+                        2: "2 — 5-7 yrs remaining or weak guarantee",
+                        3: "3 — 7-10 yrs or franchisee / subsidiary guarantee",
+                        4: "4 — 10-15 yrs, corporate guarantee, standard bumps",
+                        5: "5 — 15+ yrs, corporate guarantee, >=10% rent bumps",
+                    }[x],
+                    label_visibility="collapsed",
+                )
+
+            st.divider()
+
             col3, col4, col5 = st.columns(3)
 
             with col3:
-                st.caption("Physical Asset — S4a")
+                st.caption("Physical Asset — S3a")
                 site_override = st.select_slider(
                     "Site Geometry",
                     options=[-1, 0, 1, 2],
@@ -153,7 +183,7 @@ with tab_score:
                     "Captures road and anchor traffic. Tightest cap rates in the market."
                 )
 
-                st.caption("Site Access — S4b")
+                st.caption("Site Access — S3b")
                 access_score = st.select_slider(
                     "Access",
                     options=[1, 2, 3, 4, 5],
@@ -181,15 +211,15 @@ with tab_score:
                     label_visibility="collapsed",
                 )
                 if aadt >= 40000:
-                    st.success(f"{aadt:,} AADT — major arterial (+1 to S5)")
+                    st.success(f"{aadt:,} AADT — major arterial (+1 to S4)")
                 elif aadt >= 20000:
                     st.info(f"{aadt:,} AADT — standard corridor (no modifier)")
                 elif aadt >= 10000:
                     st.info(f"{aadt:,} AADT — secondary road (no modifier)")
                 elif aadt > 0:
-                    st.warning(f"{aadt:,} AADT — low traffic (-1 to S5)")
+                    st.warning(f"{aadt:,} AADT — low traffic (-1 to S4)")
 
-                st.caption("Trade Area Override — S5")
+                st.caption("Trade Area Override — S4")
                 loc_override = st.select_slider(
                     "Trade Area Override",
                     options=[-1, 0, 1],
@@ -202,6 +232,7 @@ with tab_score:
                     label_visibility="collapsed",
                 )
 
+            with col5:
                 geo_constraint = st.checkbox(
                     "Geographic permanence",
                     value=False,
@@ -210,15 +241,24 @@ with tab_score:
                 if geo_constraint:
                     st.success(
                         "Geographic constraint active — "
-                        "S5 weighted for affluent small market, S6 floor set to 4."
+                        "S4 weighted for affluent small market. "
+                        "S7 Infill floor set to 4 (Automotive)."
                     )
                 st.caption(
                     "Mountain towns (BLM / National Forest), resort markets, coastal peninsulas. "
                     "Examples: Sun Valley ID, Jackson WY, Aspen CO."
                 )
 
-            with col5:
-                st.caption("Infill and Supply Constraint — S6")
+        # ── Asset Class Module — S5, S6, S7 ─────────────────────────────────
+        with st.container(border=True):
+            st.markdown(f"**{module_info['name']} Module — S5, S6, S7**")
+
+            if asset_class == 'automotive_service':
+                st.caption(
+                    "S5 (EBITDAR Margin) and S6 (Store Performance / Rent-to-Sales) "
+                    "are calculated from the financial inputs above."
+                )
+                st.caption(f"Infill & Supply Constraint — S7")
                 infill_score = st.select_slider(
                     "Infill",
                     options=[1, 2, 3, 4, 5],
@@ -234,11 +274,341 @@ with tab_score:
                 )
                 st.caption(
                     "Score 5 if the site cannot be replicated — established urban corridor, "
-                    "no available land within 1 mile, high zoning and cost barriers, or outparcel "
-                    "on an anchor developed decades ago. Score 1 if a competitor could open next door tomorrow."
+                    "no available land within 1 mile, or outparcel on an anchor developed decades ago."
                 )
+                # Defaults for unused module vars
+                auv_vs_brand = drive_thru_score = operator_score = 3
+                membership_pct = wash_format = daily_volume = 3
+                medical_specialty = payer_mix = ti_investment = 3
+                fuel_volume = inside_sales_pct = fuel_brand = 3
+                sales_psf = lease_structure = competition_score = 3
+                membership_penetration = fitness_format = equip_lease_alignment = 3
 
-        # Notes and caveats
+            elif asset_class == 'qsr':
+                c5, c6, c7 = st.columns(3)
+                with c5:
+                    st.caption(f"AUV vs Brand Average — S5")
+                    auv_vs_brand = st.select_slider(
+                        "AUV",
+                        options=[1, 2, 3, 4, 5],
+                        value=3,
+                        format_func=lambda x: {
+                            1: "1 — <70% of brand AUV — underperforming unit",
+                            2: "2 — 70-90% of brand AUV",
+                            3: "3 — 90-110% — at brand average",
+                            4: "4 — 110-130% of brand AUV",
+                            5: "5 — >130% of brand AUV — top performer",
+                        }[x],
+                        label_visibility="collapsed",
+                    )
+                with c6:
+                    st.caption(f"Drive-Thru — S6")
+                    drive_thru_score = st.select_slider(
+                        "Drive-Thru",
+                        options=[1, 2, 3, 4, 5],
+                        value=3,
+                        format_func=lambda x: {
+                            1: "1 — No drive-thru, format mismatched to market",
+                            2: "2 — Walk-up/counter only in drive-thru market",
+                            3: "3 — Drive-thru, limited stacking or shared access",
+                            4: "4 — Single DT lane, good stacking",
+                            5: "5 — Double DT lane or pickup + DT",
+                        }[x],
+                        label_visibility="collapsed",
+                    )
+                with c7:
+                    st.caption(f"Operator Quality — S7")
+                    operator_score = st.select_slider(
+                        "Operator",
+                        options=[1, 2, 3, 4, 5],
+                        value=3,
+                        format_func=lambda x: {
+                            1: "1 — Single-unit franchisee, no track record",
+                            2: "2 — Small franchisee (<10 units)",
+                            3: "3 — Established franchisee (10-50 units)",
+                            4: "4 — Top-tier multi-unit franchisee (50+ units)",
+                            5: "5 — Corporate owned",
+                        }[x],
+                        label_visibility="collapsed",
+                    )
+                infill_score = 3
+                membership_pct = wash_format = daily_volume = 3
+                medical_specialty = payer_mix = ti_investment = 3
+                fuel_volume = inside_sales_pct = fuel_brand = 3
+                sales_psf = lease_structure = competition_score = 3
+                membership_penetration = fitness_format = equip_lease_alignment = 3
+
+            elif asset_class == 'car_wash':
+                c5, c6, c7 = st.columns(3)
+                with c5:
+                    st.caption(f"Membership Penetration — S5")
+                    membership_pct = st.select_slider(
+                        "Membership",
+                        options=[1, 2, 3, 4, 5],
+                        value=3,
+                        format_func=lambda x: {
+                            1: "1 — No membership model, transaction-based only",
+                            2: "2 — <20% membership penetration",
+                            3: "3 — 20-40% membership",
+                            4: "4 — 40-60% membership",
+                            5: "5 — >60% EFT membership penetration",
+                        }[x],
+                        label_visibility="collapsed",
+                    )
+                with c6:
+                    st.caption(f"Wash Format — S6")
+                    wash_format = st.select_slider(
+                        "Format",
+                        options=[1, 2, 3, 4, 5],
+                        value=3,
+                        format_func=lambda x: {
+                            1: "1 — Self-serve, minimal investment value",
+                            2: "2 — Full service — labor dependent, margin risk",
+                            3: "3 — In-bay automatic (IBA)",
+                            4: "4 — Express conveyor with detailing add-on",
+                            5: "5 — Express exterior conveyor, newer build, high throughput",
+                        }[x],
+                        label_visibility="collapsed",
+                    )
+                with c7:
+                    st.caption(f"Daily Volume — S7")
+                    daily_volume = st.select_slider(
+                        "Volume",
+                        options=[1, 2, 3, 4, 5],
+                        value=3,
+                        format_func=lambda x: {
+                            1: "1 — <50 cars/day — below breakeven",
+                            2: "2 — 50-100 cars/day",
+                            3: "3 — 100-200 cars/day",
+                            4: "4 — 200-300 cars/day",
+                            5: "5 — >300 cars/day average",
+                        }[x],
+                        label_visibility="collapsed",
+                    )
+                infill_score = 3
+                auv_vs_brand = drive_thru_score = operator_score = 3
+                medical_specialty = payer_mix = ti_investment = 3
+                fuel_volume = inside_sales_pct = fuel_brand = 3
+                sales_psf = lease_structure = competition_score = 3
+                membership_penetration = fitness_format = equip_lease_alignment = 3
+
+            elif asset_class == 'medical':
+                c5, c6, c7 = st.columns(3)
+                with c5:
+                    st.caption(f"Specialty & Buildout — S5")
+                    medical_specialty = st.select_slider(
+                        "Specialty",
+                        options=[1, 2, 3, 4, 5],
+                        value=3,
+                        format_func=lambda x: {
+                            1: "1 — General/urgent care in generic space",
+                            2: "2 — Primary care, basic buildout",
+                            3: "3 — Specialty clinic (ortho, cardio), standard TI",
+                            4: "4 — Surgery center or high-acuity specialty, heavy TI",
+                            5: "5 — Cancer center, hospital affiliate — irreplaceable",
+                        }[x],
+                        label_visibility="collapsed",
+                    )
+                with c6:
+                    st.caption(f"Payer Mix — S6")
+                    payer_mix = st.select_slider(
+                        "Payer Mix",
+                        options=[1, 2, 3, 4, 5],
+                        value=3,
+                        format_func=lambda x: {
+                            1: "1 — >80% Medicaid — high reimbursement risk",
+                            2: "2 — Medicaid-heavy, some commercial",
+                            3: "3 — Balanced payer mix",
+                            4: "4 — Medicare + commercial dominant",
+                            5: "5 — >70% commercial, high-income insured market",
+                        }[x],
+                        label_visibility="collapsed",
+                    )
+                with c7:
+                    st.caption(f"TI Investment — S7")
+                    ti_investment = st.select_slider(
+                        "TI",
+                        options=[1, 2, 3, 4, 5],
+                        value=3,
+                        format_func=lambda x: {
+                            1: "1 — <$50/SF — minimal, generic",
+                            2: "2 — $50-100/SF",
+                            3: "3 — $100-200/SF — meaningful build-to-suit signal",
+                            4: "4 — $200-350/SF — strong anchor investment",
+                            5: "5 — >$350/SF — hospital-grade, irreplaceable buildout",
+                        }[x],
+                        label_visibility="collapsed",
+                    )
+                infill_score = 3
+                auv_vs_brand = drive_thru_score = operator_score = 3
+                membership_pct = wash_format = daily_volume = 3
+                fuel_volume = inside_sales_pct = fuel_brand = 3
+                sales_psf = lease_structure = competition_score = 3
+                membership_penetration = fitness_format = equip_lease_alignment = 3
+
+            elif asset_class == 'convenience':
+                c5, c6, c7 = st.columns(3)
+                with c5:
+                    st.caption(f"Fuel Volume — S5")
+                    fuel_volume = st.select_slider(
+                        "Fuel Volume",
+                        options=[1, 2, 3, 4, 5],
+                        value=3,
+                        format_func=lambda x: {
+                            1: "1 — <50,000 gallons/month",
+                            2: "2 — 50-100k gallons/month",
+                            3: "3 — 100-200k gallons/month",
+                            4: "4 — 200-300k gallons/month",
+                            5: "5 — >300k gallons/month",
+                        }[x],
+                        label_visibility="collapsed",
+                    )
+                with c6:
+                    st.caption(f"Inside Sales Mix — S6")
+                    inside_sales_pct = st.select_slider(
+                        "Inside Sales",
+                        options=[1, 2, 3, 4, 5],
+                        value=3,
+                        format_func=lambda x: {
+                            1: "1 — Fuel only or <$500k inside sales",
+                            2: "2 — Basic convenience, <15% inside margin contribution",
+                            3: "3 — Standard c-store, food/beverage mix",
+                            4: "4 — Strong foodservice program (Subway, branded)",
+                            5: "5 — Proprietary food, loyalty program, >30% inside revenue",
+                        }[x],
+                        label_visibility="collapsed",
+                    )
+                with c7:
+                    st.caption(f"Fuel Brand — S7")
+                    fuel_brand = st.select_slider(
+                        "Fuel Brand",
+                        options=[1, 2, 3, 4, 5],
+                        value=3,
+                        format_func=lambda x: {
+                            1: "1 — Unbranded independent",
+                            2: "2 — Regional independent brand",
+                            3: "3 — National brand (Shell, BP, Chevron) — standard",
+                            4: "4 — National brand with long-term supply agreement",
+                            5: "5 — Premium brand (Wawa, Buc-ee's) or exclusive supply",
+                        }[x],
+                        label_visibility="collapsed",
+                    )
+                infill_score = 3
+                auv_vs_brand = drive_thru_score = operator_score = 3
+                membership_pct = wash_format = daily_volume = 3
+                medical_specialty = payer_mix = ti_investment = 3
+                sales_psf = lease_structure = competition_score = 3
+                membership_penetration = fitness_format = equip_lease_alignment = 3
+
+            elif asset_class == 'dollar_store':
+                c5, c6, c7 = st.columns(3)
+                with c5:
+                    st.caption(f"Sales per SF — S5")
+                    sales_psf = st.select_slider(
+                        "Sales PSF",
+                        options=[1, 2, 3, 4, 5],
+                        value=3,
+                        format_func=lambda x: {
+                            1: "1 — <$120/SF — below system average",
+                            2: "2 — $120-160/SF",
+                            3: "3 — $160-210/SF — at system average",
+                            4: "4 — $210-260/SF",
+                            5: "5 — >$260/SF — high-volume location",
+                        }[x],
+                        label_visibility="collapsed",
+                    )
+                with c6:
+                    st.caption(f"Lease Structure — S6")
+                    lease_structure = st.select_slider(
+                        "Lease Structure",
+                        options=[1, 2, 3, 4, 5],
+                        value=3,
+                        format_func=lambda x: {
+                            1: "1 — Gross lease, landlord bears all costs",
+                            2: "2 — Modified gross with partial expenses",
+                            3: "3 — NNN with minor landlord carve-outs",
+                            4: "4 — Absolute NNN, tenant pays all",
+                            5: "5 — Absolute NNN + corporate guarantee + rent bumps",
+                        }[x],
+                        label_visibility="collapsed",
+                    )
+                with c7:
+                    st.caption(f"Market Competition — S7")
+                    competition_score = st.select_slider(
+                        "Competition",
+                        options=[1, 2, 3, 4, 5],
+                        value=3,
+                        format_func=lambda x: {
+                            1: "1 — 2+ competing dollar stores within 1 mile",
+                            2: "2 — 1 direct competitor nearby",
+                            3: "3 — Limited local competition",
+                            4: "4 — Only dollar store within 3+ miles",
+                            5: "5 — Dominant format in underserved market",
+                        }[x],
+                        label_visibility="collapsed",
+                    )
+                infill_score = 3
+                auv_vs_brand = drive_thru_score = operator_score = 3
+                membership_pct = wash_format = daily_volume = 3
+                medical_specialty = payer_mix = ti_investment = 3
+                fuel_volume = inside_sales_pct = fuel_brand = 3
+                membership_penetration = fitness_format = equip_lease_alignment = 3
+
+            elif asset_class == 'fitness':
+                c5, c6, c7 = st.columns(3)
+                with c5:
+                    st.caption(f"Membership Count — S5")
+                    membership_penetration = st.select_slider(
+                        "Membership Count",
+                        options=[1, 2, 3, 4, 5],
+                        value=3,
+                        format_func=lambda x: {
+                            1: "1 — <500 active members",
+                            2: "2 — 500-1,000 members",
+                            3: "3 — 1,000-2,500 members",
+                            4: "4 — 2,500-4,000 members",
+                            5: "5 — >4,000 active members or wait list",
+                        }[x],
+                        label_visibility="collapsed",
+                    )
+                with c6:
+                    st.caption(f"Format & Equipment — S6")
+                    fitness_format = st.select_slider(
+                        "Fitness Format",
+                        options=[1, 2, 3, 4, 5],
+                        value=3,
+                        format_func=lambda x: {
+                            1: "1 — Basic gym, commodity equipment, no differentiation",
+                            2: "2 — Budget gym in highly competitive market",
+                            3: "3 — Midmarket — full cardio, weights, group classes",
+                            4: "4 — Premium: CrossFit, boutique, or medical fitness",
+                            5: "5 — Unique format with high switching cost",
+                        }[x],
+                        label_visibility="collapsed",
+                    )
+                with c7:
+                    st.caption(f"Lease-Equipment Alignment — S7")
+                    equip_lease_alignment = st.select_slider(
+                        "Lease Alignment",
+                        options=[1, 2, 3, 4, 5],
+                        value=3,
+                        format_func=lambda x: {
+                            1: "1 — Short lease, expensive equipment being removed",
+                            2: "2 — Lease expires before equipment depreciation",
+                            3: "3 — Standard term, acceptable alignment",
+                            4: "4 — Lease matches equipment life with renewal options",
+                            5: "5 — Long-term lease, equipment replacement cost prohibitive",
+                        }[x],
+                        label_visibility="collapsed",
+                    )
+                infill_score = 3
+                auv_vs_brand = drive_thru_score = operator_score = 3
+                membership_pct = wash_format = daily_volume = 3
+                medical_specialty = payer_mix = ti_investment = 3
+                fuel_volume = inside_sales_pct = fuel_brand = 3
+                sales_psf = lease_structure = competition_score = 3
+
+        # ── Notes and caveats ────────────────────────────────────────────────
         col_n1, col_n2 = st.columns(2)
         with col_n1:
             notes = st.text_area(
@@ -256,6 +626,7 @@ with tab_score:
     # ── Results ───────────────────────────────────────────────────────────────
     if submitted:
         inputs = {
+            'asset_class':    asset_class,
             'address':        address,
             'city':           city,
             'state':          state,
@@ -266,12 +637,32 @@ with tab_score:
             'age':            age,
             'pop_5m':         pop_5m,
             'income_5m':      income_5m,
+            'lease_score':    lease_score,
             'site_override':  site_override,
             'access_score':   access_score,
             'loc_override':   loc_override,
-            'infill_score':   infill_score,
             'aadt':           aadt,
             'geo_constraint': geo_constraint,
+            # Module-specific (safe defaults for non-active modules)
+            'infill_score':              infill_score,
+            'auv_vs_brand':              auv_vs_brand,
+            'drive_thru_score':          drive_thru_score,
+            'operator_score':            operator_score,
+            'membership_pct':            membership_pct,
+            'wash_format':               wash_format,
+            'daily_volume':              daily_volume,
+            'medical_specialty':         medical_specialty,
+            'payer_mix':                 payer_mix,
+            'ti_investment':             ti_investment,
+            'fuel_volume':               fuel_volume,
+            'inside_sales_pct':          inside_sales_pct,
+            'fuel_brand':                fuel_brand,
+            'sales_psf':                 sales_psf,
+            'lease_structure':           lease_structure,
+            'competition_score':         competition_score,
+            'membership_penetration':    membership_penetration,
+            'fitness_format':            fitness_format,
+            'equip_lease_alignment':     equip_lease_alignment,
         }
         result = score_property(inputs)
 
@@ -283,13 +674,13 @@ with tab_score:
         g1, g2, g3, _ = st.columns([1, 2, 2, 4])
         g1.metric("Grade",       result['Grade'])
         g2.metric("Pool",        result['Pool'])
-        g3.metric("Total Score", f"{result['Total Score']} / 35")
+        g3.metric("Total Score", f"{result['Total Score']} / 40")
 
         st.divider()
 
-        # Score breakdown — native metrics, no HTML
+        # Score breakdown
         st.caption("Score Breakdown")
-        score_items = [(k, v) for k, v in result.items() if k.startswith('S')]
+        score_items = [(k, v) for k, v in result.items() if k.startswith('S') and ' — ' in k]
         s_cols = st.columns(len(score_items))
         for i, (label, val) in enumerate(score_items):
             short = label.split(' —')[0].strip()
@@ -300,10 +691,14 @@ with tab_score:
 
         # Financial ratios
         st.caption("Financial Ratios")
-        m1, m2, m3 = st.columns(3)
-        m1.metric("EBITDAR / Rent", f"{result['EBITDAR/Rent']}x")
-        m2.metric("EBITDAR Margin", f"{result['EBITDAR Margin']}%")
-        m3.metric("Rent / Sales",   f"{result['Rent/Sales']}%")
+        if asset_class == 'automotive_service':
+            m1, m2, m3 = st.columns(3)
+            m1.metric("EBITDAR / Rent", f"{result['EBITDAR/Rent']}x")
+            m2.metric("EBITDAR Margin", f"{result['EBITDAR Margin']}%")
+            m3.metric("Rent / Sales",   f"{result['Rent/Sales']}%")
+        else:
+            m1, _ = st.columns([1, 3])
+            m1.metric("EBITDAR / Rent", f"{result['EBITDAR/Rent']}x")
 
         if notes:
             st.info(notes)
@@ -370,17 +765,17 @@ with tab_dash:
             ov1.metric("Geo Constrained",   summary['geo_constrained'],
                        help="Properties with geographic permanence flag active")
             ov2.metric("High Traffic (+1)", summary['high_traffic'],
-                       help="AADT >= 40,000 — received +1 to S5")
+                       help="AADT >= 40,000 — received +1 to S4")
             ov3.metric("Low Traffic (-1)",  summary['low_traffic'],
-                       help="AADT < 10,000 — received -1 to S5")
+                       help="AADT < 10,000 — received -1 to S4")
 
             st.divider()
 
             # Property table
             df = pd.DataFrame(rows)
             display_cols = [
-                'scored_at', 'address', 'city', 'state',
-                's1', 's2', 's3', 's4a', 's4b', 's5', 's6',
+                'scored_at', 'asset_class', 'address', 'city', 'state',
+                's1', 's2', 's4a', 's4b', 's5', 's3', 's6',
                 'total_score', 'formula_grade', 'formula_pool',
                 'annual_rent', 'ebitdar', 'sales',
                 'geo_constraint', 'aadt',
@@ -437,16 +832,18 @@ with tab_upload:
 | `State` | WA | |
 | `Annual Rent` | 349160 | |
 | `EBITDAR` | 1531804 | |
-| `Sales` | 5807257 | |
+| `Sales` | 5807257 | Required for Automotive |
+| `Asset Class` | automotive_service | Optional — default automotive_service |
 | `Building SF` | 13200 | Optional — default 12,000 |
 | `Store Age` | 8 | Optional — default 20 |
 | `Pop 5Mi` | 123456 | Optional — default 50,000 |
 | `Income 5Mi` | 95000 | Optional — default 90,000 |
 | `AADT` | 32000 | Optional — 0 if unknown |
+| `Lease Score` | 3 | Optional — 1 to 5 |
 | `Site Override` | 0 | Optional — -1, 0, +1, +2 |
 | `Access Score` | 3 | Optional — 1 to 5 |
 | `Loc Override` | 0 | Optional — -1, 0, +1 |
-| `Infill Score` | 3 | Optional — 1 to 5 |
+| `Infill Score` | 3 | Optional — 1 to 5 (Automotive only) |
 | `Geo Constraint` | FALSE | Optional |
         """)
 
@@ -475,40 +872,45 @@ with tab_upload:
         for idx, row in df.iterrows():
             try:
                 prop = {
-                    'annual_rent':    float(row.get('Annual Rent', 0)),
-                    'ebitdar':        float(row.get('EBITDAR', 0)),
-                    'sales':          float(row.get('Sales', 0)),
-                    'sf':             float(row.get('Building SF', 12000)),
-                    'age':            float(row.get('Store Age', 20)),
-                    'pop_5m':         float(row.get('Pop 5Mi', 50000)),
-                    'income_5m':      float(row.get('Income 5Mi', 90000)),
-                    'aadt':           float(row.get('AADT', 0)),
-                    'site_override':  int(row.get('Site Override', 0)),
-                    'access_score':   int(row.get('Access Score', 3)),
-                    'loc_override':   int(row.get('Loc Override', 0)),
-                    'infill_score':   int(row.get('Infill Score', 3)),
+                    'asset_class':   str(row.get('Asset Class', 'automotive_service')).strip() or 'automotive_service',
+                    'annual_rent':   float(row.get('Annual Rent', 0)),
+                    'ebitdar':       float(row.get('EBITDAR', 0)),
+                    'sales':         float(row.get('Sales', 0)),
+                    'sf':            float(row.get('Building SF', 12000)),
+                    'age':           float(row.get('Store Age', 20)),
+                    'pop_5m':        float(row.get('Pop 5Mi', 50000)),
+                    'income_5m':     float(row.get('Income 5Mi', 90000)),
+                    'aadt':          float(row.get('AADT', 0)),
+                    'lease_score':   int(row.get('Lease Score', 3)),
+                    'site_override': int(row.get('Site Override', 0)),
+                    'access_score':  int(row.get('Access Score', 3)),
+                    'loc_override':  int(row.get('Loc Override', 0)),
+                    'infill_score':  int(row.get('Infill Score', 3)),
                     'geo_constraint': bool(row.get('Geo Constraint', False)),
                 }
                 scored = score_property(prop)
-                results.append({
-                    'Address':        row.get('Address', ''),
-                    'City':           row.get('City', ''),
-                    'State':          row.get('State', ''),
-                    'Annual Rent':    prop['annual_rent'],
-                    'EBITDAR/Rent':   scored['EBITDAR/Rent'],
-                    'Rent/Sales':     scored['Rent/Sales'],
-                    'EBITDAR Margin': scored['EBITDAR Margin'],
-                    'S1':             scored['S1 — EBITDAR Coverage'],
-                    'S2':             scored['S2 — EBITDAR Margin'],
-                    'S3':             scored['S3 — Store Performance'],
-                    'S4a':            scored['S4a — Physical Asset'],
-                    'S4b':            scored['S4b — Site Access'],
-                    'S5':             scored['S5 — Location'],
-                    'S6':             scored['S6 — Infill & Supply'],
-                    'Total Score':    scored['Total Score'],
-                    'Grade':          scored['Grade'],
-                    'Pool':           scored['Pool'],
-                })
+
+                # Extract S1–S7 generically
+                s_scores = {
+                    k.split(' — ')[0]: v
+                    for k, v in scored.items()
+                    if ' — ' in k and k[0] == 'S'
+                }
+
+                row_out = {
+                    'Address':      row.get('Address', ''),
+                    'City':         row.get('City', ''),
+                    'State':        row.get('State', ''),
+                    'Asset Class':  prop['asset_class'],
+                    'Annual Rent':  prop['annual_rent'],
+                    'EBITDAR/Rent': scored['EBITDAR/Rent'],
+                }
+                row_out.update(s_scores)
+                row_out['Total Score'] = scored['Total Score']
+                row_out['Grade']       = scored['Grade']
+                row_out['Pool']        = scored['Pool']
+
+                results.append(row_out)
             except Exception as e:
                 errors.append(f"Row {idx + 1}: {e}")
 

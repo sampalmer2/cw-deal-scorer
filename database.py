@@ -70,10 +70,27 @@ def init_db():
         conn.commit()
 
 
+def _sval(result: dict, key_prefix: str):
+    """Return value of the first result key starting with 'key_prefix — '."""
+    return next(
+        (v for k, v in result.items() if k.startswith(key_prefix + ' —')),
+        None,
+    )
+
+
 def save_property(inputs: dict, result: dict, notes: str, caveats: str):
+    # Score column mapping (new framework → existing DB columns):
+    # s1   = S1 Rent Coverage   (unchanged)
+    # s2   = S2 Lease Quality   (was EBITDAR Margin)
+    # s4a  = S3a Physical Asset (was S4a)
+    # s4b  = S3b Site Access    (was S4b)
+    # s5   = S4 Location        (was S5)
+    # s3   = module S5          (repurposed; was Store Performance)
+    # s6   = module S6          (unchanged label, now module-specific)
+    # S7 has no DB column — not saved
     row = {
         'portfolio_name':  None,
-        'asset_class':     None,
+        'asset_class':     inputs.get('asset_class', 'automotive_service'),
         'deal_type':       None,
         'client_name':     None,
         'address':         inputs.get('address', ''),
@@ -92,13 +109,13 @@ def save_property(inputs: dict, result: dict, notes: str, caveats: str):
         'loc_override':    inputs.get('loc_override', 0),
         'infill_score':    inputs.get('infill_score', 3),
         'geo_constraint':  inputs.get('geo_constraint', False),
-        's1':              result['S1 — EBITDAR Coverage'],
-        's2':              result['S2 — EBITDAR Margin'],
-        's3':              result['S3 — Store Performance'],
-        's4a':             result['S4a — Physical Asset'],
-        's4b':             result['S4b — Site Access'],
-        's5':              result['S5 — Location'],
-        's6':              result['S6 — Infill & Supply'],
+        's1':              _sval(result, 'S1'),
+        's2':              _sval(result, 'S2'),
+        's4a':             _sval(result, 'S3a'),
+        's4b':             _sval(result, 'S3b'),
+        's5':              _sval(result, 'S4'),
+        's3':              _sval(result, 'S5'),
+        's6':              _sval(result, 'S6'),
         'total_score':     result['Total Score'],
         'formula_grade':   result['Grade'],
         'formula_pool':    result['Pool'],
@@ -107,7 +124,7 @@ def save_property(inputs: dict, result: dict, notes: str, caveats: str):
         'override_reason': None,
         'notes':           notes,
         'caveats':         caveats,
-        'formula_version': '1.0',
+        'formula_version': '2.0',
     }
 
     col_list = ', '.join(_COLS)
