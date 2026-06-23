@@ -2222,9 +2222,9 @@ with tab_intel:
                             unsafe_allow_html=True,
                         )
 
-        # ── SECTION 3 — Ask the Database ─────────────────────────────────────
+        # ── SECTION 3 — Ask the Brokers ─────────────────────────────────────
         st.divider()
-        st.markdown("### Ask the Database")
+        st.markdown("### Ask the Brokers")
 
         # Load full DB into session_state once per session; refreshable
         if '_chat_db' not in st.session_state:
