@@ -89,7 +89,7 @@ def save_property(inputs: dict, result: dict, notes: str, caveats: str):
     # s6   = module S6          (unchanged label, now module-specific)
     # S7 has no DB column — not saved
     row = {
-        'portfolio_name':  None,
+        'portfolio_name':  inputs.get('portfolio_name', None),
         'asset_class':     inputs.get('asset_class', 'automotive_service'),
         'deal_type':       None,
         'client_name':     None,

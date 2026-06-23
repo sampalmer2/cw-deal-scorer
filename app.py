@@ -1687,7 +1687,7 @@ with tab_upload:
 | `Geo Constraint` | FALSE | Optional |
         """)
 
-    dl_col, sel_col = st.columns([1, 2])
+    dl_col, sel_col, name_col = st.columns([1, 2, 2])
     with dl_col:
         st.download_button(
             "Download Excel Template",
@@ -1701,6 +1701,12 @@ with tab_upload:
             options=list(MODULES.keys()),
             format_func=lambda x: MODULES[x]['name'],
             key="upload_asset_class_selector",
+        )
+    with name_col:
+        portfolio_name = st.text_input(
+            "Portfolio Name",
+            placeholder="e.g. Whataburger 2026 or Les Schwab Q3",
+            key="upload_portfolio_name",
         )
 
     uploaded_file = st.file_uploader(
@@ -1722,15 +1728,21 @@ with tab_upload:
 
         st.success(f"{len(df)} properties loaded.")
 
-        results = []
-        errors  = []
+        results  = []
+        errors   = []
+        db_saved = 0
+        db_fails = 0
 
         for idx, row in df.iterrows():
             try:
                 row_ac = str(row.get('Asset Class', '')).strip()
                 prop_ac = row_ac if row_ac in MODULES else upload_asset_class
                 prop = {
+                    'portfolio_name': portfolio_name or None,
                     'asset_class':    prop_ac,
+                    'address':        str(row.get('Address', '') or ''),
+                    'city':           str(row.get('City', '') or ''),
+                    'state':          str(row.get('State', '') or ''),
                     'annual_rent':    _rfloat(row, 'Annual Rent', default=0),
                     'ebitdar':        _rfloat(row, 'EBITDAR', default=0),
                     'sales':          _rfloat(row, 'Sales', default=0),
@@ -1792,10 +1804,32 @@ with tab_upload:
                 row_out['Pool']        = scored['Pool']
 
                 results.append(row_out)
+
+                if db_ok:
+                    try:
+                        notes_val   = str(row.get('Notes', '') or '')
+                        caveats_val = str(row.get('Caveats', '') or '')
+                        save_property(prop, scored, notes_val, caveats_val)
+                        db_saved += 1
+                    except Exception as db_err:
+                        db_fails += 1
+                        errors.append(f"Row {idx + 1} DB save failed: {db_err}")
+
             except Exception as e:
                 errors.append(f"Row {idx + 1}: {e}")
 
         results_df = pd.DataFrame(results)
+
+        if db_ok:
+            if db_saved > 0 and db_fails == 0:
+                st.success(f"{db_saved} of {len(results_df)} properties saved to database.")
+            elif db_saved > 0:
+                st.warning(
+                    f"{db_saved} saved to database — {db_fails} failed. "
+                    "See error details below."
+                )
+            elif db_fails > 0:
+                st.error(f"All {db_fails} database saves failed. Scores still shown below.")
 
         st.divider()
 
