@@ -3,12 +3,19 @@ import pandas as pd
 from scorer import score_property, MODULES, FORMULA_VERSION
 from database import (
     init_db, save_property, save_outcome,
-    get_all_scores, get_accuracy_metrics, get_disagreements, get_outcomes_for_analysis,
+    get_all_scores, get_accuracy_metrics, get_disagreements,
+    get_outcomes_for_analysis, find_similar_deals,
 )
 import urllib.parse
 import io
 import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment
+
+try:
+    import anthropic as _anthropic
+    _ANTHROPIC_OK = True
+except ImportError:
+    _ANTHROPIC_OK = False
 
 
 def _build_template() -> io.BytesIO:
@@ -337,8 +344,8 @@ try:
 except Exception:
     db_ok = False
 
-tab_score, tab_dash, tab_upload = st.tabs([
-    "Score Property", "Dashboard", "Upload Portfolio",
+tab_score, tab_dash, tab_upload, tab_intel = st.tabs([
+    "Score Property", "Dashboard", "Upload Portfolio", "Deal Intelligence",
 ])
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2040,3 +2047,177 @@ with tab_upload:
             with st.expander(f"{len(errors)} rows had errors"):
                 for e in errors:
                     st.write(e)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 4 — DEAL INTELLIGENCE
+# ─────────────────────────────────────────────────────────────────────────────
+with tab_intel:
+    st.markdown("## Deal Intelligence")
+    st.caption("Surface patterns from scored deals and get AI analysis on what the formula misses.")
+
+    if not db_ok:
+        st.info("Add DATABASE_URL to Streamlit secrets to enable Deal Intelligence.")
+    else:
+        # ── SECTION 1 — Similar Deals Lookup ─────────────────────────────────
+        st.markdown("### Similar Deals Lookup")
+
+        with st.form("intel_form"):
+            fi1, fi2, fi3 = st.columns(3)
+            with fi1:
+                intel_ac = st.selectbox(
+                    "Asset Class",
+                    options=list(MODULES.keys()),
+                    format_func=lambda x: MODULES[x]['name'],
+                    key="intel_ac",
+                )
+                intel_grade = st.selectbox(
+                    "Grade Filter",
+                    ["All", "A", "B", "C"],
+                    key="intel_grade",
+                )
+            with fi2:
+                intel_state = st.text_input(
+                    "State (optional)",
+                    placeholder="e.g. TX",
+                    key="intel_state",
+                )
+                intel_rent_min = st.number_input(
+                    "Min Annual Rent ($)",
+                    min_value=0, value=0, step=10000,
+                    key="intel_rent_min",
+                )
+            with fi3:
+                intel_rent_max = st.number_input(
+                    "Max Annual Rent ($)",
+                    min_value=0, value=0, step=10000,
+                    help="Leave 0 for no upper limit.",
+                    key="intel_rent_max",
+                )
+
+            find_clicked = st.form_submit_button(
+                "Find Similar Deals", type="primary"
+            )
+
+        if find_clicked:
+            try:
+                rows = find_similar_deals(
+                    asset_class=intel_ac,
+                    grade=intel_grade,
+                    state=intel_state or None,
+                    rent_min=intel_rent_min or None,
+                    rent_max=intel_rent_max or None,
+                )
+                st.session_state['_intel_rows']   = rows
+                st.session_state['_intel_ac']     = intel_ac
+                st.session_state['_intel_grade']  = intel_grade
+                st.session_state.pop('_intel_analysis', None)
+            except Exception as e:
+                st.error(f"Query failed: {e}")
+
+        _intel_rows = st.session_state.get('_intel_rows')
+        if _intel_rows is not None:
+            if not _intel_rows:
+                st.info("No live deals found matching those filters.")
+            else:
+                df_intel = pd.DataFrame(_intel_rows)
+
+                # Format for display
+                df_display = df_intel.copy()
+                df_display['annual_rent']    = df_display['annual_rent'].apply(
+                    lambda v: f"${v:,.0f}" if pd.notna(v) else "—"
+                )
+                df_display['close_cap_rate'] = df_display['close_cap_rate'].apply(
+                    lambda v: f"{v*100:.2f}%" if pd.notna(v) else "—"
+                )
+                df_display['scored_at'] = pd.to_datetime(
+                    df_display['scored_at']
+                ).dt.strftime('%Y-%m-%d')
+                df_display.columns = [
+                    "Address", "City", "State", "Asset Class",
+                    "Formula Grade", "Broker Grade", "Annual Rent",
+                    "Close Cap Rate", "Override Reason", "Broker Thesis", "Scored",
+                ]
+
+                st.caption(f"{len(_intel_rows)} deal{'s' if len(_intel_rows) != 1 else ''} found")
+                st.dataframe(df_display, use_container_width=True, hide_index=True)
+
+                # ── SECTION 2 — AI Deal Analysis ──────────────────────────────
+                st.divider()
+                st.markdown("### AI Deal Analysis")
+
+                ai_ready = _ANTHROPIC_OK and ("ANTHROPIC_API_KEY" in st.secrets)
+
+                if not ai_ready:
+                    if not _ANTHROPIC_OK:
+                        st.warning("anthropic package not installed.")
+                    else:
+                        st.warning(
+                            "Add ANTHROPIC_API_KEY to Streamlit secrets to enable AI analysis."
+                        )
+                else:
+                    if st.button("Analyze with AI", type="primary", key="_intel_analyze"):
+                        # Build plain-text table for the prompt
+                        prompt_rows = []
+                        for r in _intel_rows:
+                            cap = f"{r['close_cap_rate']*100:.2f}%" if r.get('close_cap_rate') else "unknown"
+                            thesis = r.get('broker_thesis') or "none recorded"
+                            override = r.get('override_reason') or "none"
+                            broker_g = r.get('broker_grade') or "agreed with formula"
+                            prompt_rows.append(
+                                f"- {r.get('address','?')}, {r.get('city','?')} {r.get('state','?')} | "
+                                f"Asset: {r.get('asset_class','?')} | "
+                                f"Formula: {r.get('formula_grade','?')} | "
+                                f"Broker: {broker_g} | "
+                                f"Rent: ${r.get('annual_rent',0):,.0f} | "
+                                f"Cap: {cap} | "
+                                f"Override: {override} | "
+                                f"Thesis: {thesis}"
+                            )
+                        table_text = "\n".join(prompt_rows)
+                        n = len(_intel_rows)
+                        ac_label = MODULES.get(
+                            st.session_state.get('_intel_ac', ''), {}
+                        ).get('name', st.session_state.get('_intel_ac', ''))
+                        grade_label = st.session_state.get('_intel_grade', 'All grades')
+
+                        user_prompt = (
+                            f"Here are {n} similar {ac_label} deals "
+                            f"({grade_label} grade) our brokers have scored:\n\n"
+                            f"{table_text}\n\n"
+                            "Based on this deal history, what patterns do you see? "
+                            "What factors consistently drove broker overrides? "
+                            "What outcomes resulted? "
+                            "What should the broker consider when scoring a new deal "
+                            "in this category?"
+                        )
+
+                        with st.spinner("Analyzing with Claude…"):
+                            try:
+                                client = _anthropic.Anthropic(
+                                    api_key=st.secrets["ANTHROPIC_API_KEY"]
+                                )
+                                msg = client.messages.create(
+                                    model="claude-sonnet-4-6",
+                                    max_tokens=1000,
+                                    system=(
+                                        "You are an expert net lease capital markets analyst "
+                                        "for the YAFC team at Cushman & Wakefield. "
+                                        "You analyze deal patterns and broker judgment "
+                                        "to surface insights."
+                                    ),
+                                    messages=[{"role": "user", "content": user_prompt}],
+                                )
+                                analysis = msg.content[0].text
+                                st.session_state['_intel_analysis'] = analysis
+                            except Exception as e:
+                                st.error(f"AI analysis failed: {e}")
+
+                    analysis = st.session_state.get('_intel_analysis')
+                    if analysis:
+                        st.markdown(
+                            f'<div style="background:#F5F6F7;border-left:4px solid #1D1740;'
+                            f'padding:1.2rem 1.5rem;border-radius:4px;'
+                            f'font-size:0.9rem;line-height:1.7;white-space:pre-wrap;">'
+                            f'{analysis}</div>',
+                            unsafe_allow_html=True,
+                        )

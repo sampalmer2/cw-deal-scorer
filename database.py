@@ -125,6 +125,7 @@ def init_db():
                 "ALTER TABLE scores ADD COLUMN IF NOT EXISTS is_portfolio_deal     BOOLEAN DEFAULT FALSE",
                 "ALTER TABLE scores ADD COLUMN IF NOT EXISTS portfolio_id          TEXT",
                 "ALTER TABLE scores ADD COLUMN IF NOT EXISTS broker_thesis         TEXT",
+                "ALTER TABLE scores ADD COLUMN IF NOT EXISTS close_cap_rate        NUMERIC",
             ]:
                 cur.execute(stmt)
 
@@ -264,6 +265,52 @@ def log_score_change(score_id: int, changed_by: str, field_changed: str,
                 },
             )
         conn.commit()
+
+
+def find_similar_deals(asset_class: str, grade: str = None, state: str = None,
+                       rent_min: float = None, rent_max: float = None) -> list[dict]:
+    """Return live scored deals matching the given filters, newest first."""
+    conditions = ["record_type = 'live'", "asset_class = %(asset_class)s"]
+    params: dict = {'asset_class': asset_class}
+
+    if grade and grade != 'All':
+        conditions.append("formula_grade = %(grade)s")
+        params['grade'] = grade
+
+    if state:
+        conditions.append("UPPER(state) = UPPER(%(state)s)")
+        params['state'] = state.strip()
+
+    if rent_min is not None and rent_min > 0:
+        conditions.append("annual_rent >= %(rent_min)s")
+        params['rent_min'] = rent_min
+
+    if rent_max is not None and rent_max > 0:
+        conditions.append("annual_rent <= %(rent_max)s")
+        params['rent_max'] = rent_max
+
+    where = ' AND '.join(conditions)
+
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(f"""
+                SELECT
+                    address,
+                    city,
+                    state,
+                    asset_class,
+                    formula_grade,
+                    broker_grade,
+                    annual_rent,
+                    close_cap_rate,
+                    override_reason,
+                    broker_thesis,
+                    scored_at
+                FROM scores
+                WHERE {where}
+                ORDER BY scored_at DESC
+            """, params)
+            return [dict(r) for r in cur.fetchall()]
 
 
 def load_all() -> list[dict]:
