@@ -21,7 +21,7 @@ _COLS = [
     # ── Broker Override ──────────────────────────────────────────────────────
     'broker_name', 'broker_grade', 'override_reason', 'override_notes',
     # ── Notes ────────────────────────────────────────────────────────────────
-    'notes', 'caveats', 'scoring_notes',
+    'notes', 'caveats', 'scoring_notes', 'broker_thesis',
     # ── Metadata ─────────────────────────────────────────────────────────────
     'formula_version', 'record_type',
     'scored_by', 'scoring_time_seconds', 'score_iteration',
@@ -124,6 +124,7 @@ def init_db():
                 "ALTER TABLE scores ADD COLUMN IF NOT EXISTS buyer_type            TEXT",
                 "ALTER TABLE scores ADD COLUMN IF NOT EXISTS is_portfolio_deal     BOOLEAN DEFAULT FALSE",
                 "ALTER TABLE scores ADD COLUMN IF NOT EXISTS portfolio_id          TEXT",
+                "ALTER TABLE scores ADD COLUMN IF NOT EXISTS broker_thesis         TEXT",
             ]:
                 cur.execute(stmt)
 
@@ -206,6 +207,7 @@ def save_property(inputs: dict, result: dict, notes: str, caveats: str):
         'notes':                notes,
         'caveats':              caveats,
         'scoring_notes':        inputs.get('scoring_notes', None),
+        'broker_thesis':        inputs.get('broker_thesis', None),
         # Metadata
         'formula_version':      inputs.get('formula_version', 'v1.1'),
         'record_type':          inputs.get('record_type', 'test'),

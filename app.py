@@ -1355,6 +1355,22 @@ with tab_score:
                 placeholder="Formula calibration context, assumptions, or session notes...",
             )
 
+        # ── Broker Thesis ────────────────────────────────────────────────────
+        broker_thesis = st.text_area(
+            "Broker Thesis",
+            placeholder=(
+                "Why does this deal trade where it trades? "
+                "What does the formula miss? Be specific — "
+                "volume, site, market position, tenant story."
+            ),
+            help=(
+                "Why does this deal trade where it trades? "
+                "What does the formula miss? Be specific — "
+                "volume, site, market position, tenant story."
+            ),
+            height=150,
+        )
+
         # ── Record type + formula version ────────────────────────────────────
         rt_col, fv_col = st.columns([3, 1])
         with rt_col:
@@ -1438,6 +1454,7 @@ with tab_score:
             'cap_rate_market':           cap_rate_market or None,
             'interest_rate_10yr':        interest_rate_10yr or None,
             'scoring_notes':             scoring_notes or None,
+            'broker_thesis':             broker_thesis or None,
         }
         result = score_property(inputs)
         # Cache so the display + override section survive checkbox re-renders
