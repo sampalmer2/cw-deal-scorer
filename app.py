@@ -19,7 +19,10 @@ st.markdown("""
 html, body, [class*="css"] {
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
 }
-.block-container {
+/* Remove top padding — target multiple Streamlit container selectors across versions */
+.block-container,
+[data-testid="stMainBlockContainer"],
+[data-testid="stAppViewBlockContainer"] {
     padding-top: 0 !important;
     padding-bottom: 3rem !important;
 }
@@ -69,12 +72,13 @@ hr { border-color: #EAECEF !important; }
 
 # ── Header bar ─────────────────────────────────────────────────────────────
 st.markdown(
-    '<div style="background:#1D1740;padding:0.8rem 2rem;margin-bottom:2rem;">'
-    '<span style="color:#fff;font-size:1rem;font-weight:600;letter-spacing:-0.01em;">'
-    'YAFC Deal Scorer</span>'
-    '<span style="color:rgba(255,255,255,0.4);font-size:0.68rem;letter-spacing:0.08em;'
-    'text-transform:uppercase;margin-left:1.5rem;">'
-    'Cushman &amp; Wakefield &nbsp;·&nbsp; Net Lease Underwriting</span>'
+    '<div style="background:#1D1740;padding:0.85rem 2.5rem;'
+    'margin:-5rem -5rem 2rem -5rem;">'
+    '<span style="color:#ffffff;font-size:1.05rem;font-weight:600;'
+    'letter-spacing:-0.01em;">YAFC Deal Scorer</span>'
+    '<span style="color:rgba(255,255,255,0.4);font-size:0.68rem;'
+    'letter-spacing:0.09em;text-transform:uppercase;margin-left:1.5rem;">'
+    'Cushman &amp; Wakefield &nbsp;&middot;&nbsp; Net Lease Underwriting</span>'
     '</div>',
     unsafe_allow_html=True,
 )
