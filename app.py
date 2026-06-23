@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from scorer import score_property
+from database import init_db, save_property, load_all, load_summary
 import urllib.parse
 import io
 
@@ -10,16 +11,23 @@ st.markdown("## YAFC Deal Scorer")
 st.markdown("*Cushman & Wakefield — Net Lease Underwriting Tool*")
 st.divider()
 
-mode = st.radio(
-    "Scoring Mode",
-    ["Score a Single Property", "Upload Excel — Score Portfolio"],
-    horizontal=True
-)
+# Init DB on every cold start (CREATE TABLE IF NOT EXISTS — safe to call repeatedly)
+try:
+    init_db()
+    db_ok = True
+except Exception:
+    db_ok = False
+
+tab_score, tab_dash, tab_upload = st.tabs([
+    "📋 Score Property",
+    "📊 Dashboard",
+    "📁 Upload Portfolio",
+])
 
 # ─────────────────────────────────────────────
-# SINGLE PROPERTY MODE
+# TAB 1 — SCORE PROPERTY
 # ─────────────────────────────────────────────
-if mode == "Score a Single Property":
+with tab_score:
 
     with st.form("property_form"):
         st.markdown("### Property Details")
@@ -184,7 +192,10 @@ if mode == "Score a Single Property":
         )
 
     if submitted:
-        result = score_property({
+        inputs = {
+            'address':        address,
+            'city':           city,
+            'state':          state,
             'annual_rent':    annual_rent,
             'ebitdar':        ebitdar,
             'sales':          sales,
@@ -198,7 +209,8 @@ if mode == "Score a Single Property":
             'infill_score':   infill_score,
             'aadt':           aadt,
             'geo_constraint': geo_constraint,
-        })
+        }
+        result = score_property(inputs)
 
         st.divider()
         st.markdown(f"### {address}, {city} {state}")
@@ -210,7 +222,7 @@ if mode == "Score a Single Property":
             f"<p style='font-size:20px;margin:0'>"
             f"<b>{result['Pool']}</b></p>"
             f"<p style='color:gray'>"
-            f"Total Score: {result['Total Score']} / 30</p>",
+            f"Total Score: {result['Total Score']} / 35</p>",
             unsafe_allow_html=True
         )
 
@@ -251,10 +263,117 @@ if mode == "Score a Single Property":
             f"(https://www.google.com/maps?q={query}&layer=c)"
         )
 
+        # ── Save to database ──────────────────────────────────────
+        st.divider()
+        if db_ok:
+            try:
+                save_property(inputs, result, notes, caveats)
+                st.success("✅ Saved to database.")
+            except Exception as e:
+                st.warning(f"Score complete — database save failed: {e}")
+        else:
+            st.info("Database not configured — score not saved. "
+                    "Add DATABASE_URL to Streamlit secrets to enable.")
+
 # ─────────────────────────────────────────────
-# PORTFOLIO UPLOAD MODE
+# TAB 2 — DASHBOARD
 # ─────────────────────────────────────────────
-else:
+with tab_dash:
+    st.markdown("### Scored Properties")
+
+    if not db_ok:
+        st.info("Add DATABASE_URL to Streamlit secrets to enable the dashboard.")
+        st.stop()
+
+    try:
+        summary = load_summary()
+        rows    = load_all()
+    except Exception as e:
+        st.error(f"Could not load data: {e}")
+        st.stop()
+
+    if not rows:
+        st.info("No properties scored yet. Score a property to populate the dashboard.")
+        st.stop()
+
+    # ── Summary metrics ───────────────────────────────────────────
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("Total Scored",      summary['total'])
+    c2.metric("Grade A — Launch",  summary['grade_a'])
+    c3.metric("Grade B — Holdback", summary['grade_b'])
+    c4.metric("Grade C — Yield",   summary['grade_c'])
+    c5.metric("Avg Score",         summary['avg_score'])
+    c6.metric("Avg Coverage",      f"{summary['avg_coverage']}×")
+
+    st.divider()
+
+    # ── Override analysis ─────────────────────────────────────────
+    st.markdown("#### Override Analysis")
+    ov1, ov2, ov3 = st.columns(3)
+    ov1.metric("Geo Constrained",  summary['geo_constrained'],
+               help="Properties with geographic permanence flag active")
+    ov2.metric("High Traffic (+1)", summary['high_traffic'],
+               help="AADT ≥ 40,000 — received +1 to S5")
+    ov3.metric("Low Traffic (−1)",  summary['low_traffic'],
+               help="AADT < 10,000 — received −1 to S5")
+
+    st.divider()
+
+    # ── Property table ────────────────────────────────────────────
+    df = pd.DataFrame(rows)
+
+    display_cols = [
+        'scored_at', 'address', 'city', 'state',
+        's1', 's2', 's3', 's4a', 's4b', 's5', 's6',
+        'total_score', 'grade', 'pool',
+        'ebitdar_rent', 'ebitdar_margin', 'rent_sales',
+        'geo_constraint', 'aadt_modifier',
+    ]
+    df_display = df[[c for c in display_cols if c in df.columns]].copy()
+    df_display['scored_at'] = pd.to_datetime(
+        df_display['scored_at']
+    ).dt.strftime('%Y-%m-%d %H:%M')
+
+    grade_filter = st.multiselect(
+        "Filter by Grade",
+        options=["A", "B", "C"],
+        default=["A", "B", "C"],
+        key="dash_grade_filter"
+    )
+    df_display = df_display[df_display['grade'].isin(grade_filter)]
+
+    def color_grade(val):
+        return {
+            'A': 'background-color:#D4EDDA',
+            'B': 'background-color:#FFF3CD',
+            'C': 'background-color:#F8D7DA'
+        }.get(val, '')
+
+    st.dataframe(
+        df_display.style.map(color_grade, subset=['grade']),
+        use_container_width=True,
+        height=500
+    )
+
+    # ── Download full history ─────────────────────────────────────
+    st.divider()
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        pd.DataFrame(rows).to_excel(
+            writer, index=False, sheet_name='Scored Properties'
+        )
+    output.seek(0)
+    st.download_button(
+        label="⬇️ Download Full History as Excel",
+        data=output,
+        file_name="YAFC_Scored_History.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+# ─────────────────────────────────────────────
+# TAB 3 — UPLOAD PORTFOLIO
+# ─────────────────────────────────────────────
+with tab_upload:
     st.markdown("### Upload Portfolio Excel")
     st.caption(
         "Upload a spreadsheet with one row per property. "
@@ -307,13 +426,13 @@ else:
         for idx, row in df.iterrows():
             try:
                 prop = {
-                    'annual_rent':   float(row.get('Annual Rent', 0)),
-                    'ebitdar':       float(row.get('EBITDAR', 0)),
-                    'sales':         float(row.get('Sales', 0)),
-                    'sf':            float(row.get('Building SF', 12000)),
-                    'age':           float(row.get('Store Age', 20)),
-                    'pop_5m':        float(row.get('Pop 5Mi', 50000)),
-                    'income_5m':     float(row.get('Income 5Mi', 90000)),
+                    'annual_rent':    float(row.get('Annual Rent', 0)),
+                    'ebitdar':        float(row.get('EBITDAR', 0)),
+                    'sales':          float(row.get('Sales', 0)),
+                    'sf':             float(row.get('Building SF', 12000)),
+                    'age':            float(row.get('Store Age', 20)),
+                    'pop_5m':         float(row.get('Pop 5Mi', 50000)),
+                    'income_5m':      float(row.get('Income 5Mi', 90000)),
                     'aadt':           float(row.get('AADT', 0)),
                     'site_override':  int(row.get('Site Override', 0)),
                     'access_score':   int(row.get('Access Score', 3)),
@@ -363,11 +482,12 @@ else:
         grade_filter = st.multiselect(
             "Filter by Grade",
             options=["A", "B", "C"],
-            default=["A", "B", "C"]
+            default=["A", "B", "C"],
+            key="upload_grade_filter"
         )
         filtered = results_df[results_df['Grade'].isin(grade_filter)]
 
-        def color_grade(val):
+        def color_grade_upload(val):
             return {
                 'A': 'background-color:#D4EDDA',
                 'B': 'background-color:#FFF3CD',
@@ -375,7 +495,7 @@ else:
             }.get(val, '')
 
         st.dataframe(
-            filtered.style.map(color_grade, subset=['Grade']),
+            filtered.style.map(color_grade_upload, subset=['Grade']),
             use_container_width=True,
             height=500
         )
@@ -392,12 +512,10 @@ else:
             label="⬇️ Download Scored Results as Excel",
             data=output,
             file_name="YAFC_Scored_Portfolio.xlsx",
-            mime="application/vnd.openxmlformats-officedocument"
-                 ".spreadsheetml.sheet"
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
         if errors:
             with st.expander(f"⚠️ {len(errors)} rows had errors"):
                 for e in errors:
                     st.write(e)
-                    
