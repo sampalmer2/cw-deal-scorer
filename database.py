@@ -167,3 +167,105 @@ def load_summary() -> dict:
                 FROM scores
             """)
             return dict(cur.fetchone())
+
+
+def get_all_scores():
+    """Return all rows as (list_of_tuples, col_names) for DataFrame construction."""
+    dicts = load_all()
+    if not dicts:
+        return [], []
+    cols = list(dicts[0].keys())
+    rows = [list(d.values()) for d in dicts]
+    return rows, cols
+
+
+def save_outcome(score_id: int, outcome: dict):
+    """Update close/outcome data on an existing scored row."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE scores SET
+                    outcome         = %(outcome)s,
+                    close_date      = %(close_date)s,
+                    list_price      = %(list_price)s,
+                    close_price     = %(close_price)s,
+                    list_cap_rate   = %(list_cap_rate)s,
+                    close_cap_rate  = %(close_cap_rate)s,
+                    days_on_market  = %(days_on_market)s,
+                    buyer_type      = %(buyer_type)s,
+                    num_offers      = %(num_offers)s,
+                    financing       = %(financing)s
+                WHERE id = %(id)s
+            """, {**outcome, 'id': score_id})
+        conn.commit()
+
+
+def get_outcomes_for_analysis():
+    """Return all scored deals that have close data."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT
+                    id, address, city, state, asset_class,
+                    s1, s2, s4a, s4b, s5, s3, s6,
+                    total_score, formula_grade, broker_grade,
+                    override_reason, close_cap_rate, close_price,
+                    days_on_market, buyer_type, num_offers,
+                    outcome, close_date
+                FROM scores
+                WHERE close_cap_rate IS NOT NULL
+                ORDER BY close_date DESC
+            """)
+            rows = cur.fetchall()
+            cols = [d[0] for d in cur.description]
+    return rows, cols
+
+
+def get_disagreements():
+    """Return formula vs broker grade disagreements grouped by state and asset class."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT
+                    state,
+                    asset_class,
+                    formula_grade,
+                    broker_grade,
+                    COUNT(*)                                     AS count,
+                    AVG(total_score)                             AS avg_score,
+                    STRING_AGG(DISTINCT override_reason, ' | ') AS reasons
+                FROM scores
+                WHERE broker_grade IS NOT NULL
+                  AND broker_grade != ''
+                  AND broker_grade != formula_grade
+                GROUP BY state, asset_class, formula_grade, broker_grade
+                ORDER BY count DESC
+            """)
+            rows = cur.fetchall()
+            cols = [d[0] for d in cur.description]
+    return rows, cols
+
+
+def get_accuracy_metrics() -> dict:
+    """Return aggregate scoring accuracy and outcome metrics."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT
+                    COUNT(*)                                                                           AS total_scored,
+                    COUNT(broker_grade) FILTER (WHERE broker_grade IS NOT NULL AND broker_grade != '') AS total_broker_scored,
+                    COUNT(*) FILTER (WHERE broker_grade = formula_grade)                               AS agreements,
+                    COUNT(*) FILTER (WHERE broker_grade != formula_grade
+                                      AND broker_grade IS NOT NULL AND broker_grade != '')             AS disagreements,
+                    COUNT(*) FILTER (WHERE close_cap_rate IS NOT NULL)                                 AS total_with_outcomes,
+                    AVG(close_cap_rate) FILTER (WHERE formula_grade = 'A')                             AS avg_cap_a,
+                    AVG(close_cap_rate) FILTER (WHERE formula_grade = 'B')                             AS avg_cap_b,
+                    AVG(close_cap_rate) FILTER (WHERE formula_grade = 'C')                             AS avg_cap_c,
+                    AVG(days_on_market) FILTER (WHERE formula_grade = 'A')                             AS avg_dom_a,
+                    AVG(days_on_market) FILTER (WHERE formula_grade = 'B')                             AS avg_dom_b,
+                    AVG(days_on_market) FILTER (WHERE formula_grade = 'C')                             AS avg_dom_c
+                FROM scores
+            """)
+            row  = cur.fetchone()
+            cols = [d[0] for d in cur.description]
+    return dict(zip(cols, row)) if row else {}

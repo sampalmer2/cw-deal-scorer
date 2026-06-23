@@ -1,7 +1,10 @@
 import streamlit as st
 import pandas as pd
 from scorer import score_property, MODULES
-from database import init_db, save_property, load_all, load_summary
+from database import (
+    init_db, save_property, save_outcome,
+    get_all_scores, get_accuracy_metrics, get_disagreements, get_outcomes_for_analysis,
+)
 import urllib.parse
 import io
 
@@ -734,84 +737,198 @@ with tab_dash:
     if not db_ok:
         st.info("Add DATABASE_URL to Streamlit secrets to enable the dashboard.")
     else:
+        st.markdown("## Dashboard")
+        st.markdown("*Formula accuracy, partner agreement, and deal outcomes*")
+        st.divider()
+
         try:
-            summary      = load_summary()
-            rows         = load_all()
-            dash_load_ok = True
+            metrics = get_accuracy_metrics()
+
+            if not metrics or metrics.get('total_scored', 0) == 0:
+                st.info("No scored properties yet. Score a property and save it to see analytics here.")
+            else:
+                # ── SCORING SUMMARY ───────────────────────────────────────
+                st.markdown("### Scoring Summary")
+                c1, c2, c3, c4, c5 = st.columns(5)
+                c1.metric("Total Scored",    metrics.get('total_scored', 0))
+                c2.metric("Broker Scored",   metrics.get('total_broker_scored', 0))
+
+                broker_scored  = metrics.get('total_broker_scored', 0) or 1
+                agreement_rate = round((metrics.get('agreements', 0) / broker_scored) * 100, 1)
+                c3.metric("Agreement Rate",  f"{agreement_rate}%")
+                c4.metric("Disagreements",   metrics.get('disagreements', 0))
+                c5.metric("Closed Deals",    metrics.get('total_with_outcomes', 0))
+
+                st.divider()
+
+                # ── CAP RATE BY GRADE ─────────────────────────────────────
+                if metrics.get('total_with_outcomes', 0) > 0:
+                    st.markdown("### Cap Rate by Grade")
+                    st.caption(
+                        "Validates whether formula grades predict market pricing. "
+                        "Lower cap rate = formula working correctly."
+                    )
+
+                    avg_a = metrics.get('avg_cap_a')
+                    avg_b = metrics.get('avg_cap_b')
+                    avg_c = metrics.get('avg_cap_c')
+                    g1, g2, g3 = st.columns(3)
+                    g1.metric(
+                        "Grade A — Avg Cap Rate",
+                        f"{round(avg_a * 100, 2)}%" if avg_a else "No data yet",
+                        help="Should be lowest — A sites command tightest pricing",
+                    )
+                    g2.metric(
+                        "Grade B — Avg Cap Rate",
+                        f"{round(avg_b * 100, 2)}%" if avg_b else "No data yet",
+                    )
+                    g3.metric(
+                        "Grade C — Avg Cap Rate",
+                        f"{round(avg_c * 100, 2)}%" if avg_c else "No data yet",
+                        help="Should be highest — C sites trade widest",
+                    )
+
+                    dom_a = metrics.get('avg_dom_a')
+                    dom_b = metrics.get('avg_dom_b')
+                    dom_c = metrics.get('avg_dom_c')
+                    d1, d2, d3 = st.columns(3)
+                    d1.metric("Grade A — Avg Days on Market", f"{round(dom_a)}" if dom_a else "No data yet")
+                    d2.metric("Grade B — Avg Days on Market", f"{round(dom_b)}" if dom_b else "No data yet")
+                    d3.metric("Grade C — Avg Days on Market", f"{round(dom_c)}" if dom_c else "No data yet")
+
+                    st.divider()
+
+                # ── DISAGREEMENT ANALYSIS ─────────────────────────────────
+                st.markdown("### Where Formula and Broker Disagree")
+                st.caption(
+                    "These patterns show where the formula needs refinement. "
+                    "The most common override reasons are the next things to fix."
+                )
+                try:
+                    dis_rows, dis_cols = get_disagreements()
+                    if dis_rows:
+                        df_dis = pd.DataFrame(dis_rows, columns=dis_cols)
+                        st.dataframe(df_dis, use_container_width=True)
+                        top_state  = df_dis.iloc[0].get('state', 'N/A')
+                        top_reason = df_dis.iloc[0].get('reasons', 'N/A')
+                        st.info(f"Most common disagreement: **{top_state}** — {top_reason}")
+                    else:
+                        st.success("Formula and broker agree on all scored properties so far.")
+                except Exception as e:
+                    st.warning(f"Could not load disagreement data: {e}")
+
+                st.divider()
+
+                # ── OUTCOME ENTRY FORM ────────────────────────────────────
+                st.markdown("### Log a Deal Outcome")
+                st.caption(
+                    "Enter close data after a deal closes. "
+                    "This is the most important input for formula calibration."
+                )
+                try:
+                    all_rows, all_cols = get_all_scores()
+                    df_all = pd.DataFrame(all_rows, columns=all_cols)
+
+                    if not df_all.empty:
+                        df_all['label'] = df_all.apply(
+                            lambda r: (
+                                f"#{r['id']} — "
+                                f"{r.get('address', '?')}, "
+                                f"{r.get('city', '?')} "
+                                f"{r.get('state', '?')} "
+                                f"(Grade {r.get('formula_grade', '?')})"
+                            ),
+                            axis=1,
+                        )
+                        selected_label = st.selectbox(
+                            "Select property to update",
+                            options=df_all['label'].tolist(),
+                        )
+                        selected_id = int(df_all[df_all['label'] == selected_label]['id'].values[0])
+
+                        with st.form("outcome_form"):
+                            st.markdown(f"**Logging outcome for:** {selected_label}")
+                            oc1, oc2 = st.columns(2)
+                            with oc1:
+                                outcome_status = st.selectbox(
+                                    "Outcome",
+                                    ["Sold", "Under Contract", "Withdrawn", "Still Marketing", "Passed"],
+                                )
+                                close_date  = st.date_input("Close Date")
+                                list_price  = st.number_input("List Price ($)",  min_value=0, value=0, step=10000)
+                                close_price = st.number_input("Close Price ($)", min_value=0, value=0, step=10000)
+                            with oc2:
+                                list_cap    = st.number_input("List Cap Rate",  min_value=0.0, value=0.0, step=0.001, format="%.3f")
+                                close_cap   = st.number_input("Close Cap Rate", min_value=0.0, value=0.0, step=0.001, format="%.3f")
+                                dom         = st.number_input("Days on Market",    min_value=0, value=0, step=1)
+                                num_offers  = st.number_input("Number of Offers",  min_value=0, value=0, step=1)
+                                buyer_type  = st.selectbox(
+                                    "Buyer Type",
+                                    ["1031 Exchange", "Institutional / REIT", "Private / Family Office", "Owner User", "Other"],
+                                )
+                                financing = st.selectbox("Financing", ["Cash", "Financed", "Assumed"])
+                            save_outcome_btn = st.form_submit_button("Save Outcome", type="primary")
+
+                        if save_outcome_btn:
+                            save_outcome(selected_id, {
+                                'outcome':        outcome_status,
+                                'close_date':     str(close_date),
+                                'list_price':     list_price  if list_price  > 0 else None,
+                                'close_price':    close_price if close_price > 0 else None,
+                                'list_cap_rate':  list_cap    if list_cap    > 0 else None,
+                                'close_cap_rate': close_cap   if close_cap   > 0 else None,
+                                'days_on_market': dom         if dom         > 0 else None,
+                                'buyer_type':     buyer_type,
+                                'num_offers':     num_offers  if num_offers  > 0 else None,
+                                'financing':      financing,
+                            })
+                            st.success(f"Outcome saved for property #{selected_id}")
+                            st.rerun()
+
+                except Exception as e:
+                    st.warning(f"Could not load properties for outcome entry: {e}")
+
+                st.divider()
+
+                # ── ALL SCORED PROPERTIES ─────────────────────────────────
+                st.markdown("### All Scored Properties")
+                try:
+                    all_rows, all_cols = get_all_scores()
+                    df_scores = pd.DataFrame(all_rows, columns=all_cols)
+
+                    if not df_scores.empty:
+                        grade_filter = st.multiselect(
+                            "Filter by Formula Grade",
+                            options=["A", "B", "C"],
+                            default=["A", "B", "C"],
+                            key="dashboard_grade_filter",
+                        )
+                        if 'formula_grade' in df_scores.columns:
+                            df_filtered = df_scores[df_scores['formula_grade'].isin(grade_filter)]
+                        else:
+                            df_filtered = df_scores
+
+                        st.dataframe(df_filtered, use_container_width=True, height=400)
+
+                        output = io.BytesIO()
+                        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                            df_scores.astype(str).to_excel(
+                                writer, index=False, sheet_name='Scored Properties'
+                            )
+                        output.seek(0)
+                        st.download_button(
+                            "Download All Scores",
+                            data=output,
+                            file_name="YAFC_All_Scores.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="dashboard_download",
+                        )
+                except Exception as e:
+                    st.error(f"Could not load scored properties: {e}")
+
         except Exception as e:
-            st.error(f"Could not load data: {e}")
-            dash_load_ok = False
-            rows         = []
-            summary      = None
-
-        if dash_load_ok and not rows:
-            st.info("No scored properties yet — score a property and save it to see it here.")
-        elif dash_load_ok and rows:
-
-            # Summary metrics
-            c1, c2, c3, c4, c5, c6 = st.columns(6)
-            c1.metric("Total Scored",       summary['total'])
-            c2.metric("Grade A — Launch",   summary['grade_a'])
-            c3.metric("Grade B — Holdback", summary['grade_b'])
-            c4.metric("Grade C — Yield",    summary['grade_c'])
-            c5.metric("Avg Score",          summary['avg_score'])
-            c6.metric("Avg Coverage",       f"{summary['avg_coverage']}x")
-
-            st.divider()
-
-            # Override analysis
-            st.caption("Override Analysis")
-            ov1, ov2, ov3 = st.columns(3)
-            ov1.metric("Geo Constrained",   summary['geo_constrained'],
-                       help="Properties with geographic permanence flag active")
-            ov2.metric("High Traffic (+1)", summary['high_traffic'],
-                       help="AADT >= 40,000 — received +1 to S4")
-            ov3.metric("Low Traffic (-1)",  summary['low_traffic'],
-                       help="AADT < 10,000 — received -1 to S4")
-
-            st.divider()
-
-            # Property table
-            df = pd.DataFrame(rows)
-            display_cols = [
-                'scored_at', 'asset_class', 'address', 'city', 'state',
-                's1', 's2', 's4a', 's4b', 's5', 's3', 's6',
-                'total_score', 'formula_grade', 'formula_pool',
-                'annual_rent', 'ebitdar', 'sales',
-                'geo_constraint', 'aadt',
-            ]
-            df_display = df[[c for c in display_cols if c in df.columns]].copy()
-            df_display['scored_at'] = pd.to_datetime(
-                df_display['scored_at']
-            ).dt.strftime('%Y-%m-%d %H:%M')
-
-            grade_filter = st.multiselect(
-                "Filter by grade",
-                options=["A", "B", "C"],
-                default=["A", "B", "C"],
-                key="dash_grade_filter",
-            )
-            df_display = df_display[df_display['formula_grade'].isin(grade_filter)]
-
-            st.dataframe(df_display, use_container_width=True, height=460)
-
-            st.divider()
-            output = io.BytesIO()
-            df_export = (
-                pd.DataFrame(rows)
-                .astype(str)
-                .replace('None', '')
-                .replace('nan', '')
-            )
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df_export.to_excel(writer, index=False, sheet_name='Scored Properties')
-            output.seek(0)
-            st.download_button(
-                "Download Full History",
-                data=output,
-                file_name="YAFC_Scored_History.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
+            st.error(f"Dashboard error: {e}")
+            st.caption("Check that DATABASE_URL is set correctly in Streamlit secrets.")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TAB 3 — UPLOAD PORTFOLIO
