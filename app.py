@@ -79,17 +79,17 @@ if mode == "Score a Single Property":
                 min_value=0,
                 value=0,
                 step=1000,
-                help="Annual Average Daily Traffic on the fronting road. "
-                     "Leave 0 if unknown — will not affect score."
+                help="Annual Average Daily Traffic on the "
+                     "fronting road. Leave 0 if unknown."
             )
             if aadt >= 40000:
-                st.success(f"✅ {aadt:,} AADT — major arterial  (+1 to S5)")
+                st.success(f"✅ {aadt:,} AADT — major arterial (+1 to S5)")
             elif aadt >= 20000:
-                st.info(f"ℹ️ {aadt:,} AADT — standard corridor  (no modifier)")
+                st.info(f"ℹ️ {aadt:,} AADT — standard corridor (no modifier)")
             elif aadt >= 10000:
-                st.info(f"ℹ️ {aadt:,} AADT — secondary road  (no modifier)")
+                st.info(f"ℹ️ {aadt:,} AADT — secondary road (no modifier)")
             elif aadt > 0:
-                st.warning(f"⚠️ {aadt:,} AADT — low traffic  (−1 to S5)")
+                st.warning(f"⚠️ {aadt:,} AADT — low traffic (−1 to S5)")
 
             loc_override = st.select_slider(
                 "Trade Area Override (S5)",
@@ -98,12 +98,28 @@ if mode == "Score a Single Property":
                 format_func=lambda x: {
                     -1: "−1  Warehouse / very low car ownership",
                      0: " 0  Standard",
-                     1: "+1  Strong co-tenancy, college town"
+                     1: "+1  Strong co-tenancy / captive corridor"
                 }[x]
             )
+
+            geo_constraint = st.checkbox(
+                "📍 Geographic permanence",
+                value=False,
+                help="Check if physical geography permanently "
+                     "prevents competitive development"
+            )
+            if geo_constraint:
+                st.success(
+                    "✅ Geographic constraint active — "
+                    "S5 weighted for affluent small market · "
+                    "S6 floor set to 4"
+                )
             st.caption(
-                "AADT auto-adjusts S5. Use the override for "
-                "co-tenancy and car ownership factors."
+                "**Check for:** Mountain towns surrounded by BLM / "
+                "National Forest / wilderness · resort markets · "
+                "coastal peninsulas · island markets. "
+                "Examples: Sun Valley ID · Jackson WY · "
+                "Aspen CO · coastal Oregon towns."
             )
 
         with col5:
@@ -145,17 +161,18 @@ if mode == "Score a Single Property":
 
     if submitted:
         result = score_property({
-            'annual_rent':   annual_rent,
-            'ebitdar':       ebitdar,
-            'sales':         sales,
-            'sf':            sf,
-            'age':           age,
-            'pop_5m':        pop_5m,
-            'income_5m':     income_5m,
-            'aadt':          aadt,
-            'site_override': site_override,
-            'loc_override':  loc_override,
-            'infill_score':  infill_score,
+            'annual_rent':    annual_rent,
+            'ebitdar':        ebitdar,
+            'sales':          sales,
+            'sf':             sf,
+            'age':            age,
+            'pop_5m':         pop_5m,
+            'income_5m':      income_5m,
+            'site_override':  site_override,
+            'loc_override':   loc_override,
+            'infill_score':   infill_score,
+            'aadt':           aadt,
+            'geo_constraint': geo_constraint,
         })
 
         st.divider()
@@ -238,6 +255,7 @@ else:
 | `Site Override` | 0 | Optional — −1, 0, +1, or +2 for outparcel |
 | `Loc Override` | 0 | Optional — −1, 0, or +1 |
 | `Infill Score` | 3 | Optional — 1 through 5 |
+| `Geo Constraint` | FALSE | Optional — TRUE if geography permanently prevents competition |
         """)
 
     uploaded_file = st.file_uploader(
@@ -270,10 +288,11 @@ else:
                     'age':           float(row.get('Store Age', 20)),
                     'pop_5m':        float(row.get('Pop 5Mi', 50000)),
                     'income_5m':     float(row.get('Income 5Mi', 90000)),
-                    'aadt':          float(row.get('AADT', 0)),
-                    'site_override': int(row.get('Site Override', 0)),
-                    'loc_override':  int(row.get('Loc Override', 0)),
-                    'infill_score':  int(row.get('Infill Score', 3)),
+                    'aadt':           float(row.get('AADT', 0)),
+                    'site_override':  int(row.get('Site Override', 0)),
+                    'loc_override':   int(row.get('Loc Override', 0)),
+                    'infill_score':   int(row.get('Infill Score', 3)),
+                    'geo_constraint': bool(row.get('Geo Constraint', False)),
                 }
                 scored = score_property(prop)
                 results.append({

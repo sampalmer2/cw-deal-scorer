@@ -28,7 +28,7 @@ def score_property(p):
     base += p.get('site_override', 0)
     s4 = max(1, min(5, base))
 
-    # S5: Location / Demographics + AADT modifier
+    # S5: Location / Demographics + AADT + Geographic Constraint
     pop = p.get('pop_5m', 50000)
     inc = p.get('income_5m', 90000)
     ps  = 5 if pop>=200000 else 4 if pop>=100000 else \
@@ -36,24 +36,35 @@ def score_property(p):
     ins = 5 if inc>=150000 else 4 if inc>=110000 else \
           3 if inc>=85000  else 2 if inc>=70000  else 1
 
-    # AADT modifier — auto-populated or manual override
+    # AADT modifier
     aadt = p.get('aadt', 0)
     if aadt >= 40000:             aadt_mod = 1
-    elif aadt < 10000 and aadt > 0: aadt_mod = -1
+    elif aadt > 0 and aadt < 10000: aadt_mod = -1
     else:                         aadt_mod = 0
 
-    # Combine demographic score, trade area override, and AADT
-    loc_override = p.get('loc_override', 0)
-    s5 = max(1, min(5, round((ps + ins) / 2) + loc_override + aadt_mod))
+    loc_override   = p.get('loc_override', 0)
+    geo_constraint = p.get('geo_constraint', False)
+
+    # Small affluent geographically constrained market
+    # Weight income 70/30 instead of 50/50
+    if geo_constraint and pop < 25000 and inc >= 120000:
+        s5 = max(1, min(5, round(
+            (ps * 0.3) + (ins * 0.7) + loc_override + aadt_mod
+        )))
+    else:
+        s5 = max(1, min(5, round(
+            (ps + ins) / 2 + loc_override + aadt_mod
+        )))
 
     # S6: Infill & Supply Constraint
-    # Pure broker judgment — no formula can calculate this
-    # 5 = classic infill or outparcel on established anchor, irreplaceable
-    # 4 = strong infill, limited supply, high barriers to entry
-    # 3 = established suburban corridor, standard underwrite
-    # 2 = growth market, land available, competition risk emerging
-    # 1 = greenfield, open land, competitor could open next door tomorrow
-    s6 = p.get('infill_score', 3)
+    # Geographic permanence sets a floor of 4
+    # Cannot score below 4 if land is physically
+    # impossible to develop
+    infill_score = p.get('infill_score', 3)
+    if geo_constraint:
+        s6 = max(4, infill_score)
+    else:
+        s6 = infill_score
 
     total = s1 + s2 + s3 + s4 + s5 + s6
 
@@ -77,4 +88,6 @@ def score_property(p):
         'EBITDAR/Rent':           round(e2r, 2),
         'EBITDAR Margin':         round(m * 100, 1),
         'Rent/Sales':             round(r2s * 100, 1),
+        'Geo Constraint Applied': geo_constraint,
+        'AADT Modifier':          aadt_mod,
     }
