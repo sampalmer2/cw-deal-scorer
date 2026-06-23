@@ -358,8 +358,9 @@ with tab_dash:
     # ── Download full history ─────────────────────────────────────
     st.divider()
     output = io.BytesIO()
+    df_export = pd.DataFrame(rows).astype(str).replace('None', '').replace('nan', '')
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        pd.DataFrame(rows).to_excel(
+        df_export.to_excel(
             writer, index=False, sheet_name='Scored Properties'
         )
     output.seek(0)
