@@ -39,8 +39,8 @@ def init_db():
                     s5                  INTEGER,
                     s6                  INTEGER,
                     total_score         INTEGER,
-                    grade               TEXT,
-                    pool                TEXT,
+                    formula_grade       TEXT,
+                    formula_pool        TEXT,
                     ebitdar_rent        NUMERIC,
                     ebitdar_margin      NUMERIC,
                     rent_sales          NUMERIC,
@@ -63,7 +63,7 @@ def save_property(inputs: dict, result: dict, notes: str, caveats: str):
                     site_override, access_score, loc_override,
                     infill_score, geo_constraint,
                     s1, s2, s3, s4a, s4b, s5, s6,
-                    total_score, grade, pool,
+                    total_score, formula_grade, formula_pool,
                     ebitdar_rent, ebitdar_margin, rent_sales,
                     aadt_modifier, notes, caveats
                 ) VALUES (
@@ -73,7 +73,7 @@ def save_property(inputs: dict, result: dict, notes: str, caveats: str):
                     %(site_override)s, %(access_score)s, %(loc_override)s,
                     %(infill_score)s, %(geo_constraint)s,
                     %(s1)s, %(s2)s, %(s3)s, %(s4a)s, %(s4b)s, %(s5)s, %(s6)s,
-                    %(total_score)s, %(grade)s, %(pool)s,
+                    %(total_score)s, %(formula_grade)s, %(formula_pool)s,
                     %(ebitdar_rent)s, %(ebitdar_margin)s, %(rent_sales)s,
                     %(aadt_modifier)s, %(notes)s, %(caveats)s
                 )
@@ -102,8 +102,8 @@ def save_property(inputs: dict, result: dict, notes: str, caveats: str):
                 's5':            result['S5 — Location'],
                 's6':            result['S6 — Infill & Supply'],
                 'total_score':   result['Total Score'],
-                'grade':         result['Grade'],
-                'pool':          result['Pool'],
+                'formula_grade': result['Grade'],
+                'formula_pool':  result['Pool'],
                 'ebitdar_rent':  result['EBITDAR/Rent'],
                 'ebitdar_margin': result['EBITDAR Margin'],
                 'rent_sales':    result['Rent/Sales'],
@@ -130,9 +130,9 @@ def load_summary() -> dict:
             cur.execute("""
                 SELECT
                     COUNT(*)                                    AS total,
-                    COUNT(*) FILTER (WHERE grade = 'A')         AS grade_a,
-                    COUNT(*) FILTER (WHERE grade = 'B')         AS grade_b,
-                    COUNT(*) FILTER (WHERE grade = 'C')         AS grade_c,
+                    COUNT(*) FILTER (WHERE formula_grade = 'A') AS grade_a,
+                    COUNT(*) FILTER (WHERE formula_grade = 'B') AS grade_b,
+                    COUNT(*) FILTER (WHERE formula_grade = 'C') AS grade_c,
                     ROUND(AVG(total_score)::numeric, 1)         AS avg_score,
                     ROUND(AVG(ebitdar_rent)::numeric, 2)        AS avg_coverage,
                     ROUND(AVG(ebitdar_margin)::numeric, 1)      AS avg_margin,
