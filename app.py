@@ -24,7 +24,7 @@ def _build_template() -> io.BytesIO:
     ws.title = "Scoring Template"
 
     columns = [
-        "Address", "City", "State", "Zip Code",
+        "Address", "City", "State", "Asset Class", "Zip Code",
         "Annual Rent", "EBITDAR", "Sales",
         "Building SF", "Store Age", "Year Built", "Lot Size (Acres)", "Num Bays",
         "Lease Type", "Lease Term (Years)", "Lease Remaining (Years)", "Lease Expiration",
@@ -46,7 +46,7 @@ def _build_template() -> io.BytesIO:
 
     # Whataburger QSR example — EBITDAR and Sales left blank for blind-mode demo
     example = [
-        "2401 S Lamar Blvd", "Austin", "TX", "78704",
+        "2401 S Lamar Blvd", "Austin", "TX", "qsr", "78704",
         325000, None, None,
         3200, 8, 2016, 0.85, None,
         "NNN", 20, 12, "2036-12-31",
@@ -89,7 +89,7 @@ def _build_template() -> io.BytesIO:
         cell.font  = ex_font
         cell.alignment = ex_align
 
-    wide_cols  = {"Address", "MSA", "Notes", "Caveats", "Guarantor", "Rent Bumps"}
+    wide_cols  = {"Address", "MSA", "Notes", "Caveats", "Guarantor", "Rent Bumps", "Asset Class"}
     med_cols   = {"City", "County", "Lease Type", "Market Type", "Lease Expiration",
                   "Avg HH Income 1 Mile", "Avg HH Income 3 Mile", "Avg HH Income 5 Mile"}
     narrow_cols = {"State", "Zip Code", "Num Bays", "Corporate Guarantee (Y/N)",
@@ -125,6 +125,7 @@ def _build_template() -> io.BytesIO:
         ("Address",                    "Street address of the subject property",                                                                           "No"),
         ("City",                       "City name",                                                                                                         "No"),
         ("State",                      "Two-letter state abbreviation (e.g. TX)",                                                                           "No"),
+        ("Asset Class",                "Asset class for scoring. Must be one of: automotive_service, qsr, car_wash, medical, convenience, dollar_store, fitness", "Yes"),
         ("Zip Code",                   "5-digit ZIP code",                                                                                                  "No"),
         ("Annual Rent",                "Annual base rent in dollars",                                                                                       "Yes"),
         ("EBITDAR",                    "Earnings before interest, taxes, D&A and rent. Leave blank to use financial-blind scoring.",                         "No"),
@@ -284,6 +285,50 @@ st.markdown(
     '</div>',
     unsafe_allow_html=True,
 )
+
+# ── Upload parsing helpers ───────────────────────────────────────────────────
+def _rint(row, *cols, default=3):
+    for c in cols:
+        v = row.get(c)
+        if v is None:
+            continue
+        try:
+            f = float(v)
+            if not (f != f):  # isnan check without importing math
+                return int(f)
+        except (ValueError, TypeError):
+            continue
+    return default
+
+
+def _rfloat(row, *cols, default=0.0):
+    for c in cols:
+        v = row.get(c)
+        if v is None:
+            continue
+        try:
+            f = float(v)
+            if not (f != f):
+                return f
+        except (ValueError, TypeError):
+            continue
+    return default
+
+
+def _rbool(row, *cols, default=False):
+    for c in cols:
+        v = row.get(c)
+        if v is None:
+            continue
+        if isinstance(v, bool):
+            return v
+        s = str(v).strip().upper()
+        if s in ('Y', 'YES', 'TRUE', '1'):
+            return True
+        if s in ('N', 'NO', 'FALSE', '0'):
+            return False
+    return default
+
 
 # Init DB
 try:
@@ -1623,12 +1668,21 @@ with tab_upload:
 | `Geo Constraint` | FALSE | Optional |
         """)
 
-    st.download_button(
-        "Download Excel Template",
-        data=_build_template(),
-        file_name="YAFC_Scoring_Template.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
+    dl_col, sel_col = st.columns([1, 2])
+    with dl_col:
+        st.download_button(
+            "Download Excel Template",
+            data=_build_template(),
+            file_name="YAFC_Scoring_Template.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    with sel_col:
+        upload_asset_class = st.selectbox(
+            "Default Asset Class (used for rows without an Asset Class column)",
+            options=list(MODULES.keys()),
+            format_func=lambda x: MODULES[x]['name'],
+            key="upload_asset_class_selector",
+        )
 
     uploaded_file = st.file_uploader(
         "Excel or CSV file",
@@ -1654,22 +1708,45 @@ with tab_upload:
 
         for idx, row in df.iterrows():
             try:
+                row_ac = str(row.get('Asset Class', '')).strip()
+                prop_ac = row_ac if row_ac in MODULES else upload_asset_class
                 prop = {
-                    'asset_class':   str(row.get('Asset Class', 'automotive_service')).strip() or 'automotive_service',
-                    'annual_rent':   float(row.get('Annual Rent', 0)),
-                    'ebitdar':       float(row.get('EBITDAR', 0)),
-                    'sales':         float(row.get('Sales', 0)),
-                    'sf':            float(row.get('Building SF', 12000)),
-                    'age':           float(row.get('Store Age', 20)),
-                    'pop_5m':        float(row.get('Pop 5Mi', 50000)),
-                    'income_5m':     float(row.get('Income 5Mi', 90000)),
-                    'aadt':          float(row.get('AADT', 0)),
-                    'lease_score':   int(row.get('Lease Score', 3)),
-                    'site_override': int(row.get('Site Override', 0)),
-                    'access_score':  int(row.get('Access Score', 3)),
-                    'loc_override':  int(row.get('Loc Override', 0)),
-                    'infill_score':  int(row.get('Infill Score', 3)),
-                    'geo_constraint': bool(row.get('Geo Constraint', False)),
+                    'asset_class':    prop_ac,
+                    'annual_rent':    _rfloat(row, 'Annual Rent', default=0),
+                    'ebitdar':        _rfloat(row, 'EBITDAR', default=0),
+                    'sales':          _rfloat(row, 'Sales', default=0),
+                    'sf':             _rfloat(row, 'Building SF', default=12000),
+                    'age':            _rfloat(row, 'Store Age', default=20),
+                    'pop_5m':         _rfloat(row, 'Pop 5 Mile', 'Pop 5Mi', default=50000),
+                    'income_5m':      _rfloat(row, 'Avg HH Income 5 Mile', 'Income 5Mi', default=90000),
+                    'aadt':           _rfloat(row, 'AADT', default=0),
+                    'lease_score':    _rint(row, 'Lease Score', default=3),
+                    'site_override':  _rint(row, 'Site Override (-1/0/1/2)', 'Site Override', default=0),
+                    'access_score':   _rint(row, 'Access Score (1-5)', 'Access Score', default=3),
+                    'loc_override':   _rint(row, 'Loc Override (-1/0/1)', 'Loc Override', default=0),
+                    'infill_score':   _rint(row, 'Infill Score (1-5)', 'Infill Score', default=3),
+                    'geo_constraint': _rbool(row, 'Geo Constraint (Y/N)', 'Geo Constraint', default=False),
+                    # Module-specific scores — all asset classes
+                    'brand_tier':             _rint(row, 'Brand Tier (1-5)', default=3),
+                    'drive_thru_score':       _rint(row, 'Drive Thru Score (1-5)', default=3),
+                    'guarantee_score':        _rint(row, 'Guarantee Score (1-5)', default=3),
+                    'auv_vs_brand':           _rint(row, 'AUV vs Brand (1-5)', default=3),
+                    'operator_score':         _rint(row, 'Operator Score (1-5)', default=3),
+                    'membership_pct':         _rint(row, 'Membership Pct (1-5)', default=3),
+                    'wash_format':            _rint(row, 'Wash Format (1-5)', default=3),
+                    'daily_volume':           _rint(row, 'Daily Volume (1-5)', default=3),
+                    'medical_specialty':      _rint(row, 'Medical Specialty (1-5)', default=3),
+                    'payer_mix':              _rint(row, 'Payer Mix (1-5)', default=3),
+                    'ti_investment':          _rint(row, 'TI Investment (1-5)', default=3),
+                    'fuel_volume':            _rint(row, 'Fuel Volume (1-5)', default=3),
+                    'inside_sales_pct':       _rint(row, 'Inside Sales Pct (1-5)', default=3),
+                    'fuel_brand':             _rint(row, 'Fuel Brand (1-5)', default=3),
+                    'sales_psf':              _rint(row, 'Sales PSF (1-5)', default=3),
+                    'lease_structure':        _rint(row, 'Lease Structure (1-5)', default=3),
+                    'competition_score':      _rint(row, 'Competition Score (1-5)', default=3),
+                    'membership_penetration': _rint(row, 'Membership Penetration (1-5)', default=3),
+                    'fitness_format':         _rint(row, 'Fitness Format (1-5)', default=3),
+                    'equip_lease_alignment':  _rint(row, 'Equip Lease Alignment (1-5)', default=3),
                 }
                 scored = score_property(prop)
 

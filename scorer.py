@@ -94,6 +94,10 @@ def score_property(p):
     # financial_blind: True when no financials provided OR mode auto-detected blind
     financial_blind = (not financials_available) or (scoring_mode == 'Financial Blind')
 
+    # ── Asset class (needed by S3a and module sections) ─────────────────────
+    asset_class = p.get('asset_class', 'automotive_service')
+    module      = MODULES.get(asset_class, MODULES['automotive_service'])
+
     # ── S2: Lease Quality (broker judgment) ───────────────────────────────────
     # 5 = 15+ yrs, corporate guarantee, >=10% bumps
     # 4 = 10-15 yrs, corporate guarantee, standard bumps
@@ -102,12 +106,40 @@ def score_property(p):
     # 1 = <5 yrs remaining or personal guarantee only
     s2 = p.get('lease_score', 3)
 
-    # ── S3a: Physical Asset Quality ───────────────────────────────────────────
+    # ── S3a: Physical Asset Quality (SF thresholds are asset-class aware) ─────
     base = 3
-    sf  = p.get('sf', 12000)
-    age = p.get('age', 20)
-    if sf >= 14000:  base += 1
-    elif sf < 8000:  base -= 1
+    sf   = p.get('sf', 12000)
+    age  = p.get('age', 20)
+
+    if asset_class == 'qsr':
+        # Prototype 2,400–3,200 SF
+        if sf >= 3200:  base += 1
+        elif sf < 1800: base -= 1
+    elif asset_class == 'car_wash':
+        # Prototype 4,000–6,000 SF
+        if sf >= 6000:  base += 1
+        elif sf < 2500: base -= 1
+    elif asset_class == 'medical':
+        # Wide range; flag extremes
+        if sf >= 8000:  base += 1
+        elif sf < 1500: base -= 1
+    elif asset_class == 'convenience':
+        # Prototype 3,000–6,000 SF
+        if sf >= 6000:  base += 1
+        elif sf < 2000: base -= 1
+    elif asset_class == 'dollar_store':
+        # Standard 8,000–12,000 SF
+        if sf >= 12000: base += 1
+        elif sf < 6000: base -= 1
+    elif asset_class == 'fitness':
+        # Large format 10,000–30,000 SF
+        if sf >= 30000: base += 1
+        elif sf < 5000: base -= 1
+    else:
+        # automotive_service prototype 8,000–14,000 SF
+        if sf >= 14000: base += 1
+        elif sf < 8000: base -= 1
+
     if age <= 10:    base += 1
     elif age >= 30:  base -= 1
     base += p.get('site_override', 0)
@@ -143,8 +175,6 @@ def score_property(p):
         )))
 
     # ── Asset Class Module (S5, S6, S7) ─────────────────────────────────────
-    asset_class = p.get('asset_class', 'automotive_service')
-    module = MODULES.get(asset_class, MODULES['automotive_service'])
 
     if asset_class == 'automotive_service':
         if not financial_blind and ebitdar > 0 and sales > 0:
