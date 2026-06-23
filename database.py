@@ -12,7 +12,7 @@ def init_db():
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                CREATE TABLE IF NOT EXISTS scored_properties (
+                CREATE TABLE IF NOT EXISTS scores (
                     id                  SERIAL PRIMARY KEY,
                     scored_at           TIMESTAMPTZ DEFAULT NOW(),
                     address             TEXT,
@@ -56,7 +56,7 @@ def save_property(inputs: dict, result: dict, notes: str, caveats: str):
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                INSERT INTO scored_properties (
+                INSERT INTO scores (
                     address, city, state,
                     annual_rent, ebitdar, sales,
                     sf, age, pop_5m, income_5m, aadt,
@@ -118,7 +118,7 @@ def load_all() -> list[dict]:
     with get_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
-                SELECT * FROM scored_properties
+                SELECT * FROM scores
                 ORDER BY scored_at DESC
             """)
             return [dict(r) for r in cur.fetchall()]
@@ -139,6 +139,6 @@ def load_summary() -> dict:
                     COUNT(*) FILTER (WHERE geo_constraint)      AS geo_constrained,
                     COUNT(*) FILTER (WHERE aadt_modifier = 1)   AS high_traffic,
                     COUNT(*) FILTER (WHERE aadt_modifier = -1)  AS low_traffic
-                FROM scored_properties
+                FROM scores
             """)
             return dict(cur.fetchone())
