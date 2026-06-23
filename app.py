@@ -101,14 +101,36 @@ tab_score, tab_dash, tab_upload = st.tabs([
 # ─────────────────────────────────────────────────────────────────────────────
 with tab_score:
 
-    # Asset class selector sits above the form so changing it re-renders inputs
-    asset_class = st.selectbox(
-        "Asset Class",
-        options=list(MODULES.keys()),
-        format_func=lambda x: MODULES[x]['name'],
-        key="asset_class_selector",
-    )
+    # Selectors outside the form so changes re-render inputs
+    sel_col, fin_col = st.columns([2, 1])
+    with sel_col:
+        asset_class = st.selectbox(
+            "Asset Class",
+            options=list(MODULES.keys()),
+            format_func=lambda x: MODULES[x]['name'],
+            key="asset_class_selector",
+        )
+    with fin_col:
+        financials_available = st.checkbox(
+            "Unit-level financials available",
+            value=True,
+            key="financials_available",
+            help=(
+                "Uncheck when you don't have EBITDAR or Sales — "
+                "switches S1 to Rent vs Market and S5/S6/S7 to market/brand signals."
+            ),
+        )
     module_info = MODULES[asset_class]
+
+    # Blind mode variable defaults (overridden by form widgets when shown)
+    rent_vs_market          = 0
+    brand_strength          = 3
+    service_bay_count       = 3
+    brand_tier              = 3
+    guarantee_score         = 3
+    operator_size           = 3
+    canopy_condition        = 3
+    lease_term_vs_equipment = 3
 
     with st.form("property_form"):
 
@@ -122,12 +144,32 @@ with tab_score:
                 state       = st.text_input("State")
                 annual_rent = st.number_input("Annual Rent ($)",
                                 min_value=0, value=350000, step=1000)
-                ebitdar     = st.number_input("EBITDAR ($)",
-                                min_value=0, value=900000, step=1000)
+                if financials_available:
+                    ebitdar = st.number_input("EBITDAR ($)",
+                                    min_value=0, value=900000, step=1000)
+                else:
+                    ebitdar = 0
+                    st.caption("Rent vs Market — S1")
+                    rent_vs_market = st.select_slider(
+                        "Rent vs Market",
+                        options=[-2, -1, 0, 1, 2],
+                        value=0,
+                        format_func=lambda x: {
+                            -2: "-2  Well above market — difficult to re-tenant",
+                            -1: "-1  Above market rent",
+                             0: " 0  At market",
+                             1: "+1  Below market — rent upside on renewal",
+                             2: "+2  Well below market — significant upside",
+                        }[x],
+                        label_visibility="collapsed",
+                    )
             with col2:
-                sales     = st.number_input("Sales ($)",
-                                min_value=0, value=4000000, step=10000,
-                                help="Unit-level revenue. Required for Automotive; context for other modules.")
+                if financials_available:
+                    sales = st.number_input("Sales ($)",
+                                    min_value=0, value=4000000, step=10000,
+                                    help="Unit-level revenue. Required for Automotive.")
+                else:
+                    sales = 0
                 sf        = st.number_input("Building SF",
                                 min_value=0, value=12000, step=100)
                 age       = st.number_input("Store Age (years)",
@@ -256,360 +298,750 @@ with tab_score:
         with st.container(border=True):
             st.markdown(f"**{module_info['name']} Module — S5, S6, S7**")
 
-            if asset_class == 'automotive_service':
+            if financials_available:
+                # ── Normal mode: financial + operational data available ────────
+                if asset_class == 'automotive_service':
+                    st.caption(
+                        "S5 (EBITDAR Margin) and S6 (Store Performance / Rent-to-Sales) "
+                        "are calculated from the financial inputs above."
+                    )
+                    st.caption("Infill & Supply Constraint — S7")
+                    infill_score = st.select_slider(
+                        "Infill",
+                        options=[1, 2, 3, 4, 5],
+                        value=3,
+                        format_func=lambda x: {
+                            1: "1 — Greenfield, open land, no supply constraint",
+                            2: "2 — Growth market, land available nearby",
+                            3: "3 — Established corridor, standard",
+                            4: "4 — Strong infill, limited land, high barriers",
+                            5: "5 — Irreplaceable: classic infill or anchor outparcel",
+                        }[x],
+                        label_visibility="collapsed",
+                    )
+                    st.caption(
+                        "Score 5 if the site cannot be replicated — established urban corridor, "
+                        "no available land within 1 mile, or outparcel on an anchor developed decades ago."
+                    )
+                    auv_vs_brand = drive_thru_score = operator_score = 3
+                    membership_pct = wash_format = daily_volume = 3
+                    medical_specialty = payer_mix = ti_investment = 3
+                    fuel_volume = inside_sales_pct = fuel_brand = 3
+                    sales_psf = lease_structure = competition_score = 3
+                    membership_penetration = fitness_format = equip_lease_alignment = 3
+
+                elif asset_class == 'qsr':
+                    c5, c6, c7 = st.columns(3)
+                    with c5:
+                        st.caption("AUV vs Brand Average — S5")
+                        auv_vs_brand = st.select_slider(
+                            "AUV",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — <70% of brand AUV — underperforming unit",
+                                2: "2 — 70-90% of brand AUV",
+                                3: "3 — 90-110% — at brand average",
+                                4: "4 — 110-130% of brand AUV",
+                                5: "5 — >130% of brand AUV — top performer",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    with c6:
+                        st.caption("Drive-Thru — S6")
+                        drive_thru_score = st.select_slider(
+                            "Drive Thru N",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — No drive-thru, format mismatched to market",
+                                2: "2 — Walk-up/counter only in drive-thru market",
+                                3: "3 — Drive-thru, limited stacking or shared access",
+                                4: "4 — Single DT lane, good stacking",
+                                5: "5 — Double DT lane or pickup + DT",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    with c7:
+                        st.caption("Operator Quality — S7")
+                        operator_score = st.select_slider(
+                            "Operator",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — Single-unit franchisee, no track record",
+                                2: "2 — Small franchisee (<10 units)",
+                                3: "3 — Established franchisee (10-50 units)",
+                                4: "4 — Top-tier multi-unit franchisee (50+ units)",
+                                5: "5 — Corporate owned",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    infill_score = 3
+                    membership_pct = wash_format = daily_volume = 3
+                    medical_specialty = payer_mix = ti_investment = 3
+                    fuel_volume = inside_sales_pct = fuel_brand = 3
+                    sales_psf = lease_structure = competition_score = 3
+                    membership_penetration = fitness_format = equip_lease_alignment = 3
+
+                elif asset_class == 'car_wash':
+                    c5, c6, c7 = st.columns(3)
+                    with c5:
+                        st.caption("Membership Penetration — S5")
+                        membership_pct = st.select_slider(
+                            "Membership",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — No membership model, transaction-based only",
+                                2: "2 — <20% membership penetration",
+                                3: "3 — 20-40% membership",
+                                4: "4 — 40-60% membership",
+                                5: "5 — >60% EFT membership penetration",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    with c6:
+                        st.caption("Wash Format — S6")
+                        wash_format = st.select_slider(
+                            "Wash Format N",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — Self-serve, minimal investment value",
+                                2: "2 — Full service — labor dependent, margin risk",
+                                3: "3 — In-bay automatic (IBA)",
+                                4: "4 — Express conveyor with detailing add-on",
+                                5: "5 — Express exterior conveyor, newer build, high throughput",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    with c7:
+                        st.caption("Daily Volume — S7")
+                        daily_volume = st.select_slider(
+                            "Volume",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — <50 cars/day — below breakeven",
+                                2: "2 — 50-100 cars/day",
+                                3: "3 — 100-200 cars/day",
+                                4: "4 — 200-300 cars/day",
+                                5: "5 — >300 cars/day average",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    infill_score = 3
+                    auv_vs_brand = drive_thru_score = operator_score = 3
+                    medical_specialty = payer_mix = ti_investment = 3
+                    fuel_volume = inside_sales_pct = fuel_brand = 3
+                    sales_psf = lease_structure = competition_score = 3
+                    membership_penetration = fitness_format = equip_lease_alignment = 3
+
+                elif asset_class == 'medical':
+                    c5, c6, c7 = st.columns(3)
+                    with c5:
+                        st.caption("Specialty & Buildout — S5")
+                        medical_specialty = st.select_slider(
+                            "Specialty N",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — General/urgent care in generic space",
+                                2: "2 — Primary care, basic buildout",
+                                3: "3 — Specialty clinic (ortho, cardio), standard TI",
+                                4: "4 — Surgery center or high-acuity specialty, heavy TI",
+                                5: "5 — Cancer center, hospital affiliate — irreplaceable",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    with c6:
+                        st.caption("Payer Mix — S6")
+                        payer_mix = st.select_slider(
+                            "Payer Mix",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — >80% Medicaid — high reimbursement risk",
+                                2: "2 — Medicaid-heavy, some commercial",
+                                3: "3 — Balanced payer mix",
+                                4: "4 — Medicare + commercial dominant",
+                                5: "5 — >70% commercial, high-income insured market",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    with c7:
+                        st.caption("TI Investment — S7")
+                        ti_investment = st.select_slider(
+                            "TI N",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — <$50/SF — minimal, generic",
+                                2: "2 — $50-100/SF",
+                                3: "3 — $100-200/SF — meaningful build-to-suit signal",
+                                4: "4 — $200-350/SF — strong anchor investment",
+                                5: "5 — >$350/SF — hospital-grade, irreplaceable buildout",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    infill_score = 3
+                    auv_vs_brand = drive_thru_score = operator_score = 3
+                    membership_pct = wash_format = daily_volume = 3
+                    fuel_volume = inside_sales_pct = fuel_brand = 3
+                    sales_psf = lease_structure = competition_score = 3
+                    membership_penetration = fitness_format = equip_lease_alignment = 3
+
+                elif asset_class == 'convenience':
+                    c5, c6, c7 = st.columns(3)
+                    with c5:
+                        st.caption("Fuel Volume — S5")
+                        fuel_volume = st.select_slider(
+                            "Fuel Volume",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — <50,000 gallons/month",
+                                2: "2 — 50-100k gallons/month",
+                                3: "3 — 100-200k gallons/month",
+                                4: "4 — 200-300k gallons/month",
+                                5: "5 — >300k gallons/month",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    with c6:
+                        st.caption("Inside Sales Mix — S6")
+                        inside_sales_pct = st.select_slider(
+                            "Inside Sales",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — Fuel only or <$500k inside sales",
+                                2: "2 — Basic convenience, <15% inside margin contribution",
+                                3: "3 — Standard c-store, food/beverage mix",
+                                4: "4 — Strong foodservice program (Subway, branded)",
+                                5: "5 — Proprietary food, loyalty program, >30% inside revenue",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    with c7:
+                        st.caption("Fuel Brand — S7")
+                        fuel_brand = st.select_slider(
+                            "Fuel Brand N",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — Unbranded independent",
+                                2: "2 — Regional independent brand",
+                                3: "3 — National brand (Shell, BP, Chevron) — standard",
+                                4: "4 — National brand with long-term supply agreement",
+                                5: "5 — Premium brand (Wawa, Buc-ee's) or exclusive supply",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    infill_score = 3
+                    auv_vs_brand = drive_thru_score = operator_score = 3
+                    membership_pct = wash_format = daily_volume = 3
+                    medical_specialty = payer_mix = ti_investment = 3
+                    sales_psf = lease_structure = competition_score = 3
+                    membership_penetration = fitness_format = equip_lease_alignment = 3
+
+                elif asset_class == 'dollar_store':
+                    c5, c6, c7 = st.columns(3)
+                    with c5:
+                        st.caption("Sales per SF — S5")
+                        sales_psf = st.select_slider(
+                            "Sales PSF",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — <$120/SF — below system average",
+                                2: "2 — $120-160/SF",
+                                3: "3 — $160-210/SF — at system average",
+                                4: "4 — $210-260/SF",
+                                5: "5 — >$260/SF — high-volume location",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    with c6:
+                        st.caption("Lease Structure — S6")
+                        lease_structure = st.select_slider(
+                            "Lease Structure N",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — Gross lease, landlord bears all costs",
+                                2: "2 — Modified gross with partial expenses",
+                                3: "3 — NNN with minor landlord carve-outs",
+                                4: "4 — Absolute NNN, tenant pays all",
+                                5: "5 — Absolute NNN + corporate guarantee + rent bumps",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    with c7:
+                        st.caption("Market Competition — S7")
+                        competition_score = st.select_slider(
+                            "Competition N",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — 2+ competing dollar stores within 1 mile",
+                                2: "2 — 1 direct competitor nearby",
+                                3: "3 — Limited local competition",
+                                4: "4 — Only dollar store within 3+ miles",
+                                5: "5 — Dominant format in underserved market",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    infill_score = 3
+                    auv_vs_brand = drive_thru_score = operator_score = 3
+                    membership_pct = wash_format = daily_volume = 3
+                    medical_specialty = payer_mix = ti_investment = 3
+                    fuel_volume = inside_sales_pct = fuel_brand = 3
+                    membership_penetration = fitness_format = equip_lease_alignment = 3
+
+                elif asset_class == 'fitness':
+                    c5, c6, c7 = st.columns(3)
+                    with c5:
+                        st.caption("Membership Count — S5")
+                        membership_penetration = st.select_slider(
+                            "Membership Count",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — <500 active members",
+                                2: "2 — 500-1,000 members",
+                                3: "3 — 1,000-2,500 members",
+                                4: "4 — 2,500-4,000 members",
+                                5: "5 — >4,000 active members or wait list",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    with c6:
+                        st.caption("Format & Equipment — S6")
+                        fitness_format = st.select_slider(
+                            "Fitness Format N",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — Basic gym, commodity equipment, no differentiation",
+                                2: "2 — Budget gym in highly competitive market",
+                                3: "3 — Midmarket — full cardio, weights, group classes",
+                                4: "4 — Premium: CrossFit, boutique, or medical fitness",
+                                5: "5 — Unique format with high switching cost",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    with c7:
+                        st.caption("Lease-Equipment Alignment — S7")
+                        equip_lease_alignment = st.select_slider(
+                            "Lease Alignment",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — Short lease, expensive equipment being removed",
+                                2: "2 — Lease expires before equipment depreciation",
+                                3: "3 — Standard term, acceptable alignment",
+                                4: "4 — Lease matches equipment life with renewal options",
+                                5: "5 — Long-term lease, equipment replacement cost prohibitive",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    infill_score = 3
+                    auv_vs_brand = drive_thru_score = operator_score = 3
+                    membership_pct = wash_format = daily_volume = 3
+                    medical_specialty = payer_mix = ti_investment = 3
+                    fuel_volume = inside_sales_pct = fuel_brand = 3
+                    sales_psf = lease_structure = competition_score = 3
+
+            else:
+                # ── Financial Blind mode: no unit-level data ──────────────────
                 st.caption(
-                    "S5 (EBITDAR Margin) and S6 (Store Performance / Rent-to-Sales) "
-                    "are calculated from the financial inputs above."
+                    "No unit-level financial or operational data — "
+                    "using market, brand, and physical signals."
                 )
-                st.caption(f"Infill & Supply Constraint — S7")
-                infill_score = st.select_slider(
-                    "Infill",
-                    options=[1, 2, 3, 4, 5],
-                    value=3,
-                    format_func=lambda x: {
-                        1: "1 — Greenfield, open land, no supply constraint",
-                        2: "2 — Growth market, land available nearby",
-                        3: "3 — Established corridor, standard",
-                        4: "4 — Strong infill, limited land, high barriers",
-                        5: "5 — Irreplaceable: classic infill or anchor outparcel",
-                    }[x],
-                    label_visibility="collapsed",
-                )
-                st.caption(
-                    "Score 5 if the site cannot be replicated — established urban corridor, "
-                    "no available land within 1 mile, or outparcel on an anchor developed decades ago."
-                )
-                # Defaults for unused module vars
-                auv_vs_brand = drive_thru_score = operator_score = 3
-                membership_pct = wash_format = daily_volume = 3
-                medical_specialty = payer_mix = ti_investment = 3
-                fuel_volume = inside_sales_pct = fuel_brand = 3
-                sales_psf = lease_structure = competition_score = 3
-                membership_penetration = fitness_format = equip_lease_alignment = 3
 
-            elif asset_class == 'qsr':
-                c5, c6, c7 = st.columns(3)
-                with c5:
-                    st.caption(f"AUV vs Brand Average — S5")
-                    auv_vs_brand = st.select_slider(
-                        "AUV",
-                        options=[1, 2, 3, 4, 5],
-                        value=3,
-                        format_func=lambda x: {
-                            1: "1 — <70% of brand AUV — underperforming unit",
-                            2: "2 — 70-90% of brand AUV",
-                            3: "3 — 90-110% — at brand average",
-                            4: "4 — 110-130% of brand AUV",
-                            5: "5 — >130% of brand AUV — top performer",
-                        }[x],
-                        label_visibility="collapsed",
-                    )
-                with c6:
-                    st.caption(f"Drive-Thru — S6")
-                    drive_thru_score = st.select_slider(
-                        "Drive-Thru",
-                        options=[1, 2, 3, 4, 5],
-                        value=3,
-                        format_func=lambda x: {
-                            1: "1 — No drive-thru, format mismatched to market",
-                            2: "2 — Walk-up/counter only in drive-thru market",
-                            3: "3 — Drive-thru, limited stacking or shared access",
-                            4: "4 — Single DT lane, good stacking",
-                            5: "5 — Double DT lane or pickup + DT",
-                        }[x],
-                        label_visibility="collapsed",
-                    )
-                with c7:
-                    st.caption(f"Operator Quality — S7")
-                    operator_score = st.select_slider(
-                        "Operator",
-                        options=[1, 2, 3, 4, 5],
-                        value=3,
-                        format_func=lambda x: {
-                            1: "1 — Single-unit franchisee, no track record",
-                            2: "2 — Small franchisee (<10 units)",
-                            3: "3 — Established franchisee (10-50 units)",
-                            4: "4 — Top-tier multi-unit franchisee (50+ units)",
-                            5: "5 — Corporate owned",
-                        }[x],
-                        label_visibility="collapsed",
-                    )
-                infill_score = 3
-                membership_pct = wash_format = daily_volume = 3
-                medical_specialty = payer_mix = ti_investment = 3
-                fuel_volume = inside_sales_pct = fuel_brand = 3
-                sales_psf = lease_structure = competition_score = 3
-                membership_penetration = fitness_format = equip_lease_alignment = 3
+                if asset_class == 'automotive_service':
+                    cb5, cb6, cb7 = st.columns(3)
+                    with cb5:
+                        st.caption("Brand Strength — S5")
+                        brand_strength = st.select_slider(
+                            "Brand Strength Auto",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — Struggling single-market operator",
+                                2: "2 — Weak regional presence",
+                                3: "3 — Established regional operator",
+                                4: "4 — Strong regional brand",
+                                5: "5 — Dominant operator (e.g. Les Schwab)",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    with cb6:
+                        st.caption("Service Bay Count — S6")
+                        service_bay_count = st.select_slider(
+                            "Bay Count",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — 1 bay",
+                                2: "2 — 2-3 bays",
+                                3: "3 — 4-5 bays",
+                                4: "4 — 6-7 bays",
+                                5: "5 — 8+ bays",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    with cb7:
+                        st.caption("Infill & Supply — S7")
+                        infill_score = st.select_slider(
+                            "Infill Auto Blind",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — Greenfield, open land, no supply constraint",
+                                2: "2 — Growth market, land available nearby",
+                                3: "3 — Established corridor, standard",
+                                4: "4 — Strong infill, limited land, high barriers",
+                                5: "5 — Irreplaceable: classic infill or anchor outparcel",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    auv_vs_brand = drive_thru_score = operator_score = 3
+                    membership_pct = wash_format = daily_volume = 3
+                    medical_specialty = payer_mix = ti_investment = 3
+                    fuel_volume = inside_sales_pct = fuel_brand = 3
+                    sales_psf = lease_structure = competition_score = 3
+                    membership_penetration = fitness_format = equip_lease_alignment = 3
 
-            elif asset_class == 'car_wash':
-                c5, c6, c7 = st.columns(3)
-                with c5:
-                    st.caption(f"Membership Penetration — S5")
-                    membership_pct = st.select_slider(
-                        "Membership",
-                        options=[1, 2, 3, 4, 5],
-                        value=3,
-                        format_func=lambda x: {
-                            1: "1 — No membership model, transaction-based only",
-                            2: "2 — <20% membership penetration",
-                            3: "3 — 20-40% membership",
-                            4: "4 — 40-60% membership",
-                            5: "5 — >60% EFT membership penetration",
-                        }[x],
-                        label_visibility="collapsed",
-                    )
-                with c6:
-                    st.caption(f"Wash Format — S6")
-                    wash_format = st.select_slider(
-                        "Format",
-                        options=[1, 2, 3, 4, 5],
-                        value=3,
-                        format_func=lambda x: {
-                            1: "1 — Self-serve, minimal investment value",
-                            2: "2 — Full service — labor dependent, margin risk",
-                            3: "3 — In-bay automatic (IBA)",
-                            4: "4 — Express conveyor with detailing add-on",
-                            5: "5 — Express exterior conveyor, newer build, high throughput",
-                        }[x],
-                        label_visibility="collapsed",
-                    )
-                with c7:
-                    st.caption(f"Daily Volume — S7")
-                    daily_volume = st.select_slider(
-                        "Volume",
-                        options=[1, 2, 3, 4, 5],
-                        value=3,
-                        format_func=lambda x: {
-                            1: "1 — <50 cars/day — below breakeven",
-                            2: "2 — 50-100 cars/day",
-                            3: "3 — 100-200 cars/day",
-                            4: "4 — 200-300 cars/day",
-                            5: "5 — >300 cars/day average",
-                        }[x],
-                        label_visibility="collapsed",
-                    )
-                infill_score = 3
-                auv_vs_brand = drive_thru_score = operator_score = 3
-                medical_specialty = payer_mix = ti_investment = 3
-                fuel_volume = inside_sales_pct = fuel_brand = 3
-                sales_psf = lease_structure = competition_score = 3
-                membership_penetration = fitness_format = equip_lease_alignment = 3
+                elif asset_class == 'qsr':
+                    cb5, cb6, cb7 = st.columns(3)
+                    with cb5:
+                        st.caption("Brand Tier — S5")
+                        brand_tier = st.select_slider(
+                            "Brand Tier QSR",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — Struggling or declining brand",
+                                2: "2 — Regional / secondary brand",
+                                3: "3 — Established national brand",
+                                4: "4 — Top-tier national brand",
+                                5: "5 — Dominant brand — McDonald's, Chick-fil-A tier",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    with cb6:
+                        st.caption("Drive-Thru — S6")
+                        drive_thru_score = st.select_slider(
+                            "Drive Thru B",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — No drive-thru, format mismatched to market",
+                                2: "2 — Walk-up/counter only in drive-thru market",
+                                3: "3 — Drive-thru, limited stacking or shared access",
+                                4: "4 — Single DT lane, good stacking",
+                                5: "5 — Double DT lane or pickup + DT",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    with cb7:
+                        st.caption("Guarantee Quality — S7")
+                        guarantee_score = st.select_slider(
+                            "Guarantee",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — Single-unit franchisee, no track record",
+                                2: "2 — Small franchisee (<10 units)",
+                                3: "3 — Established franchisee (10-50 units)",
+                                4: "4 — Top-tier multi-unit (50+ units)",
+                                5: "5 — Corporate investment grade",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    infill_score = 3
+                    auv_vs_brand = operator_score = 3
+                    membership_pct = wash_format = daily_volume = 3
+                    medical_specialty = payer_mix = ti_investment = 3
+                    fuel_volume = inside_sales_pct = fuel_brand = 3
+                    sales_psf = lease_structure = competition_score = 3
+                    membership_penetration = fitness_format = equip_lease_alignment = 3
 
-            elif asset_class == 'medical':
-                c5, c6, c7 = st.columns(3)
-                with c5:
-                    st.caption(f"Specialty & Buildout — S5")
-                    medical_specialty = st.select_slider(
-                        "Specialty",
-                        options=[1, 2, 3, 4, 5],
-                        value=3,
-                        format_func=lambda x: {
-                            1: "1 — General/urgent care in generic space",
-                            2: "2 — Primary care, basic buildout",
-                            3: "3 — Specialty clinic (ortho, cardio), standard TI",
-                            4: "4 — Surgery center or high-acuity specialty, heavy TI",
-                            5: "5 — Cancer center, hospital affiliate — irreplaceable",
-                        }[x],
-                        label_visibility="collapsed",
-                    )
-                with c6:
-                    st.caption(f"Payer Mix — S6")
-                    payer_mix = st.select_slider(
-                        "Payer Mix",
-                        options=[1, 2, 3, 4, 5],
-                        value=3,
-                        format_func=lambda x: {
-                            1: "1 — >80% Medicaid — high reimbursement risk",
-                            2: "2 — Medicaid-heavy, some commercial",
-                            3: "3 — Balanced payer mix",
-                            4: "4 — Medicare + commercial dominant",
-                            5: "5 — >70% commercial, high-income insured market",
-                        }[x],
-                        label_visibility="collapsed",
-                    )
-                with c7:
-                    st.caption(f"TI Investment — S7")
-                    ti_investment = st.select_slider(
-                        "TI",
-                        options=[1, 2, 3, 4, 5],
-                        value=3,
-                        format_func=lambda x: {
-                            1: "1 — <$50/SF — minimal, generic",
-                            2: "2 — $50-100/SF",
-                            3: "3 — $100-200/SF — meaningful build-to-suit signal",
-                            4: "4 — $200-350/SF — strong anchor investment",
-                            5: "5 — >$350/SF — hospital-grade, irreplaceable buildout",
-                        }[x],
-                        label_visibility="collapsed",
-                    )
-                infill_score = 3
-                auv_vs_brand = drive_thru_score = operator_score = 3
-                membership_pct = wash_format = daily_volume = 3
-                fuel_volume = inside_sales_pct = fuel_brand = 3
-                sales_psf = lease_structure = competition_score = 3
-                membership_penetration = fitness_format = equip_lease_alignment = 3
+                elif asset_class == 'car_wash':
+                    cb5, cb6, cb7 = st.columns(3)
+                    with cb5:
+                        st.caption("Brand Strength — S5")
+                        brand_strength = st.select_slider(
+                            "Brand Strength CW",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — Independent, no brand recognition",
+                                2: "2 — Local brand, limited presence",
+                                3: "3 — Regional brand",
+                                4: "4 — Strong regional chain",
+                                5: "5 — National brand (Mister, Zips, Splash)",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    with cb6:
+                        st.caption("Wash Format — S6")
+                        wash_format = st.select_slider(
+                            "Wash Format B",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — Self-serve, minimal investment value",
+                                2: "2 — Full service — labor dependent, margin risk",
+                                3: "3 — In-bay automatic (IBA)",
+                                4: "4 — Express conveyor with detailing add-on",
+                                5: "5 — Express exterior conveyor, newer build, high throughput",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    with cb7:
+                        st.caption("Infill & Supply — S7")
+                        infill_score = st.select_slider(
+                            "Infill CW Blind",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — Greenfield, open land, no supply constraint",
+                                2: "2 — Growth market, land available nearby",
+                                3: "3 — Established corridor, standard",
+                                4: "4 — Strong infill, limited land, high barriers",
+                                5: "5 — Irreplaceable: classic infill or anchor outparcel",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    auv_vs_brand = drive_thru_score = operator_score = 3
+                    membership_pct = daily_volume = 3
+                    medical_specialty = payer_mix = ti_investment = 3
+                    fuel_volume = inside_sales_pct = fuel_brand = 3
+                    sales_psf = lease_structure = competition_score = 3
+                    membership_penetration = fitness_format = equip_lease_alignment = 3
 
-            elif asset_class == 'convenience':
-                c5, c6, c7 = st.columns(3)
-                with c5:
-                    st.caption(f"Fuel Volume — S5")
-                    fuel_volume = st.select_slider(
-                        "Fuel Volume",
-                        options=[1, 2, 3, 4, 5],
-                        value=3,
-                        format_func=lambda x: {
-                            1: "1 — <50,000 gallons/month",
-                            2: "2 — 50-100k gallons/month",
-                            3: "3 — 100-200k gallons/month",
-                            4: "4 — 200-300k gallons/month",
-                            5: "5 — >300k gallons/month",
-                        }[x],
-                        label_visibility="collapsed",
-                    )
-                with c6:
-                    st.caption(f"Inside Sales Mix — S6")
-                    inside_sales_pct = st.select_slider(
-                        "Inside Sales",
-                        options=[1, 2, 3, 4, 5],
-                        value=3,
-                        format_func=lambda x: {
-                            1: "1 — Fuel only or <$500k inside sales",
-                            2: "2 — Basic convenience, <15% inside margin contribution",
-                            3: "3 — Standard c-store, food/beverage mix",
-                            4: "4 — Strong foodservice program (Subway, branded)",
-                            5: "5 — Proprietary food, loyalty program, >30% inside revenue",
-                        }[x],
-                        label_visibility="collapsed",
-                    )
-                with c7:
-                    st.caption(f"Fuel Brand — S7")
-                    fuel_brand = st.select_slider(
-                        "Fuel Brand",
-                        options=[1, 2, 3, 4, 5],
-                        value=3,
-                        format_func=lambda x: {
-                            1: "1 — Unbranded independent",
-                            2: "2 — Regional independent brand",
-                            3: "3 — National brand (Shell, BP, Chevron) — standard",
-                            4: "4 — National brand with long-term supply agreement",
-                            5: "5 — Premium brand (Wawa, Buc-ee's) or exclusive supply",
-                        }[x],
-                        label_visibility="collapsed",
-                    )
-                infill_score = 3
-                auv_vs_brand = drive_thru_score = operator_score = 3
-                membership_pct = wash_format = daily_volume = 3
-                medical_specialty = payer_mix = ti_investment = 3
-                sales_psf = lease_structure = competition_score = 3
-                membership_penetration = fitness_format = equip_lease_alignment = 3
+                elif asset_class == 'medical':
+                    cb5, cb6, cb7 = st.columns(3)
+                    with cb5:
+                        st.caption("Specialty & Buildout — S5")
+                        medical_specialty = st.select_slider(
+                            "Specialty B",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — Easily relocatable (urgent care in generic space)",
+                                2: "2 — Primary care, basic buildout",
+                                3: "3 — Specialty clinic, standard TI",
+                                4: "4 — Surgery center or heavy-equipment specialty",
+                                5: "5 — Equipment-heavy (dental, dialysis) — very sticky",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    with cb6:
+                        st.caption("Operator Size — S6")
+                        operator_size = st.select_slider(
+                            "Operator Size",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — Single practice, independent",
+                                2: "2 — Small group (<10 locations)",
+                                3: "3 — Mid-size group (10-50 locations)",
+                                4: "4 — Large regional group (50-100 locations)",
+                                5: "5 — National group (100+ locations)",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    with cb7:
+                        st.caption("TI Investment — S7")
+                        ti_investment = st.select_slider(
+                            "TI B",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — <$50/SF — minimal, generic",
+                                2: "2 — $50-100/SF",
+                                3: "3 — $100-200/SF — meaningful build-to-suit signal",
+                                4: "4 — $200-350/SF — strong anchor investment",
+                                5: "5 — >$350/SF — hospital-grade, irreplaceable buildout",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    infill_score = 3
+                    auv_vs_brand = drive_thru_score = operator_score = 3
+                    membership_pct = wash_format = daily_volume = 3
+                    payer_mix = 3
+                    fuel_volume = inside_sales_pct = fuel_brand = 3
+                    sales_psf = lease_structure = competition_score = 3
+                    membership_penetration = fitness_format = equip_lease_alignment = 3
 
-            elif asset_class == 'dollar_store':
-                c5, c6, c7 = st.columns(3)
-                with c5:
-                    st.caption(f"Sales per SF — S5")
-                    sales_psf = st.select_slider(
-                        "Sales PSF",
-                        options=[1, 2, 3, 4, 5],
-                        value=3,
-                        format_func=lambda x: {
-                            1: "1 — <$120/SF — below system average",
-                            2: "2 — $120-160/SF",
-                            3: "3 — $160-210/SF — at system average",
-                            4: "4 — $210-260/SF",
-                            5: "5 — >$260/SF — high-volume location",
-                        }[x],
-                        label_visibility="collapsed",
-                    )
-                with c6:
-                    st.caption(f"Lease Structure — S6")
-                    lease_structure = st.select_slider(
-                        "Lease Structure",
-                        options=[1, 2, 3, 4, 5],
-                        value=3,
-                        format_func=lambda x: {
-                            1: "1 — Gross lease, landlord bears all costs",
-                            2: "2 — Modified gross with partial expenses",
-                            3: "3 — NNN with minor landlord carve-outs",
-                            4: "4 — Absolute NNN, tenant pays all",
-                            5: "5 — Absolute NNN + corporate guarantee + rent bumps",
-                        }[x],
-                        label_visibility="collapsed",
-                    )
-                with c7:
-                    st.caption(f"Market Competition — S7")
-                    competition_score = st.select_slider(
-                        "Competition",
-                        options=[1, 2, 3, 4, 5],
-                        value=3,
-                        format_func=lambda x: {
-                            1: "1 — 2+ competing dollar stores within 1 mile",
-                            2: "2 — 1 direct competitor nearby",
-                            3: "3 — Limited local competition",
-                            4: "4 — Only dollar store within 3+ miles",
-                            5: "5 — Dominant format in underserved market",
-                        }[x],
-                        label_visibility="collapsed",
-                    )
-                infill_score = 3
-                auv_vs_brand = drive_thru_score = operator_score = 3
-                membership_pct = wash_format = daily_volume = 3
-                medical_specialty = payer_mix = ti_investment = 3
-                fuel_volume = inside_sales_pct = fuel_brand = 3
-                membership_penetration = fitness_format = equip_lease_alignment = 3
+                elif asset_class == 'convenience':
+                    cb5, cb6, cb7 = st.columns(3)
+                    with cb5:
+                        st.caption("Fuel Brand — S5")
+                        fuel_brand = st.select_slider(
+                            "Fuel Brand B",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — Unbranded independent",
+                                2: "2 — Regional independent brand",
+                                3: "3 — National brand (Shell, BP, Chevron) — standard",
+                                4: "4 — National brand with long-term supply agreement",
+                                5: "5 — Premium brand (Wawa, Buc-ee's) or exclusive supply",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    with cb6:
+                        st.caption("Canopy Condition — S6")
+                        canopy_condition = st.select_slider(
+                            "Canopy",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — Over 30 years old, deferred maintenance",
+                                2: "2 — 20-30 years old, showing age",
+                                3: "3 — 10-20 years old, serviceable condition",
+                                4: "4 — 5-10 years old, good condition",
+                                5: "5 — New build or renovated within 5 years",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    with cb7:
+                        st.caption("Infill & Supply — S7")
+                        infill_score = st.select_slider(
+                            "Infill Conv Blind",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — Greenfield, open land, no supply constraint",
+                                2: "2 — Growth market, land available nearby",
+                                3: "3 — Established corridor, standard",
+                                4: "4 — Strong infill, limited land, high barriers",
+                                5: "5 — Irreplaceable: classic infill or anchor outparcel",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    auv_vs_brand = drive_thru_score = operator_score = 3
+                    membership_pct = wash_format = daily_volume = 3
+                    medical_specialty = payer_mix = ti_investment = 3
+                    fuel_volume = inside_sales_pct = 3
+                    sales_psf = lease_structure = competition_score = 3
+                    membership_penetration = fitness_format = equip_lease_alignment = 3
 
-            elif asset_class == 'fitness':
-                c5, c6, c7 = st.columns(3)
-                with c5:
-                    st.caption(f"Membership Count — S5")
-                    membership_penetration = st.select_slider(
-                        "Membership Count",
-                        options=[1, 2, 3, 4, 5],
-                        value=3,
-                        format_func=lambda x: {
-                            1: "1 — <500 active members",
-                            2: "2 — 500-1,000 members",
-                            3: "3 — 1,000-2,500 members",
-                            4: "4 — 2,500-4,000 members",
-                            5: "5 — >4,000 active members or wait list",
-                        }[x],
-                        label_visibility="collapsed",
-                    )
-                with c6:
-                    st.caption(f"Format & Equipment — S6")
-                    fitness_format = st.select_slider(
-                        "Fitness Format",
-                        options=[1, 2, 3, 4, 5],
-                        value=3,
-                        format_func=lambda x: {
-                            1: "1 — Basic gym, commodity equipment, no differentiation",
-                            2: "2 — Budget gym in highly competitive market",
-                            3: "3 — Midmarket — full cardio, weights, group classes",
-                            4: "4 — Premium: CrossFit, boutique, or medical fitness",
-                            5: "5 — Unique format with high switching cost",
-                        }[x],
-                        label_visibility="collapsed",
-                    )
-                with c7:
-                    st.caption(f"Lease-Equipment Alignment — S7")
-                    equip_lease_alignment = st.select_slider(
-                        "Lease Alignment",
-                        options=[1, 2, 3, 4, 5],
-                        value=3,
-                        format_func=lambda x: {
-                            1: "1 — Short lease, expensive equipment being removed",
-                            2: "2 — Lease expires before equipment depreciation",
-                            3: "3 — Standard term, acceptable alignment",
-                            4: "4 — Lease matches equipment life with renewal options",
-                            5: "5 — Long-term lease, equipment replacement cost prohibitive",
-                        }[x],
-                        label_visibility="collapsed",
-                    )
-                infill_score = 3
-                auv_vs_brand = drive_thru_score = operator_score = 3
-                membership_pct = wash_format = daily_volume = 3
-                medical_specialty = payer_mix = ti_investment = 3
-                fuel_volume = inside_sales_pct = fuel_brand = 3
-                sales_psf = lease_structure = competition_score = 3
+                elif asset_class == 'dollar_store':
+                    cb5, cb6, cb7 = st.columns(3)
+                    with cb5:
+                        st.caption("Brand Tier — S5")
+                        brand_tier = st.select_slider(
+                            "Brand Tier DS",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — Independent dollar concept, no national affiliation",
+                                2: "2 — Small regional dollar chain",
+                                3: "3 — Established discount retailer",
+                                4: "4 — Family Dollar or Dollar Tree",
+                                5: "5 — Dollar General corporate",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    with cb6:
+                        st.caption("Lease Structure — S6")
+                        lease_structure = st.select_slider(
+                            "Lease Structure B",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — Gross lease, landlord bears all costs",
+                                2: "2 — Modified gross with partial expenses",
+                                3: "3 — NNN with minor landlord carve-outs",
+                                4: "4 — Absolute NNN, tenant pays all",
+                                5: "5 — Absolute NNN + corporate guarantee + rent bumps",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    with cb7:
+                        st.caption("Market Competition — S7")
+                        competition_score = st.select_slider(
+                            "Competition B",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — 2+ competing dollar stores within 1 mile",
+                                2: "2 — 1 direct competitor nearby",
+                                3: "3 — Limited local competition",
+                                4: "4 — Only dollar store within 3+ miles",
+                                5: "5 — Dominant format in underserved market",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    infill_score = 3
+                    auv_vs_brand = drive_thru_score = operator_score = 3
+                    membership_pct = wash_format = daily_volume = 3
+                    medical_specialty = payer_mix = ti_investment = 3
+                    fuel_volume = inside_sales_pct = fuel_brand = 3
+                    sales_psf = 3
+                    membership_penetration = fitness_format = equip_lease_alignment = 3
+
+                elif asset_class == 'fitness':
+                    cb5, cb6, cb7 = st.columns(3)
+                    with cb5:
+                        st.caption("Brand Strength — S5")
+                        brand_strength = st.select_slider(
+                            "Brand Strength Fit",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — Independent local gym",
+                                2: "2 — Small regional fitness chain",
+                                3: "3 — Established regional or niche brand",
+                                4: "4 — Strong national brand (Anytime, Gold's)",
+                                5: "5 — Planet Fitness or Orangetheory national franchise",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    with cb6:
+                        st.caption("Format & Equipment — S6")
+                        fitness_format = st.select_slider(
+                            "Fitness Format B",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — Basic gym, commodity equipment, no differentiation",
+                                2: "2 — Budget gym in highly competitive market",
+                                3: "3 — Midmarket — full cardio, weights, group classes",
+                                4: "4 — Premium: CrossFit, boutique, or medical fitness",
+                                5: "5 — Unique format with high switching cost",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    with cb7:
+                        st.caption("Lease Term vs Equipment — S7")
+                        lease_term_vs_equipment = st.select_slider(
+                            "Lease vs Equipment",
+                            options=[1, 2, 3, 4, 5],
+                            value=3,
+                            format_func=lambda x: {
+                                1: "1 — Short lease, expensive equipment recently installed",
+                                2: "2 — Lease expires before equipment depreciation",
+                                3: "3 — Standard term, acceptable alignment",
+                                4: "4 — Lease matches equipment life with renewals",
+                                5: "5 — Long lease, equipment replacement prohibitively expensive",
+                            }[x],
+                            label_visibility="collapsed",
+                        )
+                    infill_score = 3
+                    auv_vs_brand = drive_thru_score = operator_score = 3
+                    membership_pct = wash_format = daily_volume = 3
+                    medical_specialty = payer_mix = ti_investment = 3
+                    fuel_volume = inside_sales_pct = fuel_brand = 3
+                    sales_psf = lease_structure = competition_score = 3
+                    membership_penetration = equip_lease_alignment = 3
 
         # ── Notes and caveats ────────────────────────────────────────────────
         col_n1, col_n2 = st.columns(2)
@@ -629,24 +1061,35 @@ with tab_score:
     # ── Results ───────────────────────────────────────────────────────────────
     if submitted:
         inputs = {
-            'asset_class':    asset_class,
-            'address':        address,
-            'city':           city,
-            'state':          state,
-            'annual_rent':    annual_rent,
-            'ebitdar':        ebitdar,
-            'sales':          sales,
-            'sf':             sf,
-            'age':            age,
-            'pop_5m':         pop_5m,
-            'income_5m':      income_5m,
-            'lease_score':    lease_score,
-            'site_override':  site_override,
-            'access_score':   access_score,
-            'loc_override':   loc_override,
-            'aadt':           aadt,
-            'geo_constraint': geo_constraint,
-            # Module-specific (safe defaults for non-active modules)
+            'asset_class':        asset_class,
+            'address':            address,
+            'city':               city,
+            'state':              state,
+            'annual_rent':        annual_rent,
+            'ebitdar':            ebitdar,
+            'sales':              sales,
+            'sf':                 sf,
+            'age':                age,
+            'pop_5m':             pop_5m,
+            'income_5m':         income_5m,
+            'lease_score':        lease_score,
+            'site_override':      site_override,
+            'access_score':       access_score,
+            'loc_override':       loc_override,
+            'aadt':               aadt,
+            'geo_constraint':     geo_constraint,
+            # Financial blind mode flags
+            'financials_available':   financials_available,
+            'rent_vs_market':         rent_vs_market,
+            # Blind mode broker judgment inputs
+            'brand_strength':         brand_strength,
+            'service_bay_count':      service_bay_count,
+            'brand_tier':             brand_tier,
+            'guarantee_score':        guarantee_score,
+            'operator_size':          operator_size,
+            'canopy_condition':       canopy_condition,
+            'lease_term_vs_equipment': lease_term_vs_equipment,
+            # Module-specific normal mode inputs
             'infill_score':              infill_score,
             'auv_vs_brand':              auv_vs_brand,
             'drive_thru_score':          drive_thru_score,
@@ -673,6 +1116,15 @@ with tab_score:
         if address:
             st.markdown(f"### {address}, {city} {state}")
 
+        # Scoring mode badge
+        scoring_mode = result.get('Scoring Mode', 'Financial Blind')
+        if scoring_mode == 'Coverage Ratio':
+            st.success(f"Scoring Mode: **{scoring_mode}** — EBITDAR/Rent coverage calculated")
+        elif scoring_mode == 'Rent/Sales Ratio':
+            st.info(f"Scoring Mode: **{scoring_mode}** — Rent as % of sales calculated")
+        else:
+            st.warning(f"Scoring Mode: **{scoring_mode}** — No unit-level financials; using market/brand signals")
+
         # Grade, pool, total score
         g1, g2, g3, _ = st.columns([1, 2, 2, 4])
         g1.metric("Grade",       result['Grade'])
@@ -692,16 +1144,23 @@ with tab_score:
 
         st.divider()
 
-        # Financial ratios
-        st.caption("Financial Ratios")
-        if asset_class == 'automotive_service':
+        # Financial ratios — conditional on scoring mode
+        ebitdar_rent = result.get('EBITDAR/Rent')
+        ebitdar_margin = result.get('EBITDAR Margin')
+        rent_sales = result.get('Rent/Sales')
+
+        if ebitdar_margin is not None and rent_sales is not None:
+            # Automotive with full financials
+            st.caption("Financial Ratios")
             m1, m2, m3 = st.columns(3)
-            m1.metric("EBITDAR / Rent", f"{result['EBITDAR/Rent']}x")
-            m2.metric("EBITDAR Margin", f"{result['EBITDAR Margin']}%")
-            m3.metric("Rent / Sales",   f"{result['Rent/Sales']}%")
-        else:
+            m1.metric("EBITDAR / Rent", f"{ebitdar_rent}x")
+            m2.metric("EBITDAR Margin", f"{ebitdar_margin}%")
+            m3.metric("Rent / Sales",   f"{rent_sales}%")
+        elif ebitdar_rent is not None:
+            # Other asset class with EBITDAR coverage
+            st.caption("Financial Ratios")
             m1, _ = st.columns([1, 3])
-            m1.metric("EBITDAR / Rent", f"{result['EBITDAR/Rent']}x")
+            m1.metric("EBITDAR / Rent", f"{ebitdar_rent}x")
 
         if notes:
             st.info(notes)
