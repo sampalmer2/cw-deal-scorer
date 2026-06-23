@@ -325,9 +325,9 @@ with tab_dash:
     display_cols = [
         'scored_at', 'address', 'city', 'state',
         's1', 's2', 's3', 's4a', 's4b', 's5', 's6',
-        'total_score', 'grade', 'pool',
-        'ebitdar_rent', 'ebitdar_margin', 'rent_sales',
-        'geo_constraint', 'aadt_modifier',
+        'total_score', 'formula_grade', 'formula_pool',
+        'annual_rent', 'ebitdar', 'sales',
+        'geo_constraint', 'aadt',
     ]
     df_display = df[[c for c in display_cols if c in df.columns]].copy()
     df_display['scored_at'] = pd.to_datetime(
