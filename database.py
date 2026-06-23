@@ -41,9 +41,6 @@ def init_db():
                     total_score         INTEGER,
                     formula_grade       TEXT,
                     formula_pool        TEXT,
-                    ebitdar_rent        NUMERIC,
-                    ebitdar_margin      NUMERIC,
-                    rent_sales          NUMERIC,
                     aadt_modifier       INTEGER,
                     notes               TEXT,
                     caveats             TEXT
@@ -64,7 +61,6 @@ def save_property(inputs: dict, result: dict, notes: str, caveats: str):
                     infill_score, geo_constraint,
                     s1, s2, s3, s4a, s4b, s5, s6,
                     total_score, formula_grade, formula_pool,
-                    ebitdar_rent, ebitdar_margin, rent_sales,
                     aadt_modifier, notes, caveats
                 ) VALUES (
                     %(address)s, %(city)s, %(state)s,
@@ -74,7 +70,6 @@ def save_property(inputs: dict, result: dict, notes: str, caveats: str):
                     %(infill_score)s, %(geo_constraint)s,
                     %(s1)s, %(s2)s, %(s3)s, %(s4a)s, %(s4b)s, %(s5)s, %(s6)s,
                     %(total_score)s, %(formula_grade)s, %(formula_pool)s,
-                    %(ebitdar_rent)s, %(ebitdar_margin)s, %(rent_sales)s,
                     %(aadt_modifier)s, %(notes)s, %(caveats)s
                 )
             """, {
@@ -104,9 +99,6 @@ def save_property(inputs: dict, result: dict, notes: str, caveats: str):
                 'total_score':   result['Total Score'],
                 'formula_grade': result['Grade'],
                 'formula_pool':  result['Pool'],
-                'ebitdar_rent':  result['EBITDAR/Rent'],
-                'ebitdar_margin': result['EBITDAR Margin'],
-                'rent_sales':    result['Rent/Sales'],
                 'aadt_modifier': result['AADT Modifier'],
                 'notes':         notes,
                 'caveats':       caveats,
@@ -133,9 +125,9 @@ def load_summary() -> dict:
                     COUNT(*) FILTER (WHERE formula_grade = 'A') AS grade_a,
                     COUNT(*) FILTER (WHERE formula_grade = 'B') AS grade_b,
                     COUNT(*) FILTER (WHERE formula_grade = 'C') AS grade_c,
-                    ROUND(AVG(total_score)::numeric, 1)         AS avg_score,
-                    ROUND(AVG(ebitdar_rent)::numeric, 2)        AS avg_coverage,
-                    ROUND(AVG(ebitdar_margin)::numeric, 1)      AS avg_margin,
+                    ROUND(AVG(total_score)::numeric, 1)                              AS avg_score,
+                    ROUND(AVG(ebitdar / NULLIF(annual_rent, 0))::numeric, 2)         AS avg_coverage,
+                    ROUND(AVG(ebitdar / NULLIF(sales, 0) * 100)::numeric, 1)         AS avg_margin,
                     COUNT(*) FILTER (WHERE geo_constraint)      AS geo_constrained,
                     COUNT(*) FILTER (WHERE aadt_modifier = 1)   AS high_traffic,
                     COUNT(*) FILTER (WHERE aadt_modifier = -1)  AS low_traffic
