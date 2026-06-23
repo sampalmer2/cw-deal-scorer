@@ -340,7 +340,7 @@ with tab_dash:
         default=["A", "B", "C"],
         key="dash_grade_filter"
     )
-    df_display = df_display[df_display['grade'].isin(grade_filter)]
+    df_display = df_display[df_display['formula_grade'].isin(grade_filter)]
 
     def color_grade(val):
         return {
@@ -350,7 +350,7 @@ with tab_dash:
         }.get(val, '')
 
     st.dataframe(
-        df_display.style.map(color_grade, subset=['grade']),
+        df_display.style.map(color_grade, subset=['formula_grade']),
         use_container_width=True,
         height=500
     )
