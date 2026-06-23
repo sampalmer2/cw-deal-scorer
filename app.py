@@ -283,97 +283,94 @@ with tab_dash:
 
     if not db_ok:
         st.info("Add DATABASE_URL to Streamlit secrets to enable the dashboard.")
-        st.stop()
+    else:
+        try:
+            summary = load_summary()
+            rows    = load_all()
+            dash_load_ok = True
+        except Exception as e:
+            st.error(f"Could not load data: {e}")
+            dash_load_ok = False
+            rows = []
+            summary = None
 
-    try:
-        summary = load_summary()
-        rows    = load_all()
-    except Exception as e:
-        st.error(f"Could not load data: {e}")
-        st.stop()
+        if dash_load_ok and not rows:
+            st.info("No scored properties yet — score a property and save it to see it here.")
+        elif dash_load_ok and rows:
+            # ── Summary metrics ───────────────────────────────────
+            c1, c2, c3, c4, c5, c6 = st.columns(6)
+            c1.metric("Total Scored",       summary['total'])
+            c2.metric("Grade A — Launch",   summary['grade_a'])
+            c3.metric("Grade B — Holdback", summary['grade_b'])
+            c4.metric("Grade C — Yield",    summary['grade_c'])
+            c5.metric("Avg Score",          summary['avg_score'])
+            c6.metric("Avg Coverage",       f"{summary['avg_coverage']}×")
 
-    if not rows:
-        st.info("No properties scored yet. Score a property to populate the dashboard.")
-        st.stop()
+            st.divider()
 
-    # ── Summary metrics ───────────────────────────────────────────
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("Total Scored",      summary['total'])
-    c2.metric("Grade A — Launch",  summary['grade_a'])
-    c3.metric("Grade B — Holdback", summary['grade_b'])
-    c4.metric("Grade C — Yield",   summary['grade_c'])
-    c5.metric("Avg Score",         summary['avg_score'])
-    c6.metric("Avg Coverage",      f"{summary['avg_coverage']}×")
+            # ── Override analysis ─────────────────────────────────
+            st.markdown("#### Override Analysis")
+            ov1, ov2, ov3 = st.columns(3)
+            ov1.metric("Geo Constrained",   summary['geo_constrained'],
+                       help="Properties with geographic permanence flag active")
+            ov2.metric("High Traffic (+1)", summary['high_traffic'],
+                       help="AADT ≥ 40,000 — received +1 to S5")
+            ov3.metric("Low Traffic (−1)",  summary['low_traffic'],
+                       help="AADT < 10,000 — received −1 to S5")
 
-    st.divider()
+            st.divider()
 
-    # ── Override analysis ─────────────────────────────────────────
-    st.markdown("#### Override Analysis")
-    ov1, ov2, ov3 = st.columns(3)
-    ov1.metric("Geo Constrained",  summary['geo_constrained'],
-               help="Properties with geographic permanence flag active")
-    ov2.metric("High Traffic (+1)", summary['high_traffic'],
-               help="AADT ≥ 40,000 — received +1 to S5")
-    ov3.metric("Low Traffic (−1)",  summary['low_traffic'],
-               help="AADT < 10,000 — received −1 to S5")
+            # ── Property table ────────────────────────────────────
+            df = pd.DataFrame(rows)
 
-    st.divider()
+            display_cols = [
+                'scored_at', 'address', 'city', 'state',
+                's1', 's2', 's3', 's4a', 's4b', 's5', 's6',
+                'total_score', 'formula_grade', 'formula_pool',
+                'annual_rent', 'ebitdar', 'sales',
+                'geo_constraint', 'aadt',
+            ]
+            df_display = df[[c for c in display_cols if c in df.columns]].copy()
+            df_display['scored_at'] = pd.to_datetime(
+                df_display['scored_at']
+            ).dt.strftime('%Y-%m-%d %H:%M')
 
-    # ── Property table ────────────────────────────────────────────
-    df = pd.DataFrame(rows)
+            grade_filter = st.multiselect(
+                "Filter by Grade",
+                options=["A", "B", "C"],
+                default=["A", "B", "C"],
+                key="dash_grade_filter"
+            )
+            df_display = df_display[df_display['formula_grade'].isin(grade_filter)]
 
-    display_cols = [
-        'scored_at', 'address', 'city', 'state',
-        's1', 's2', 's3', 's4a', 's4b', 's5', 's6',
-        'total_score', 'formula_grade', 'formula_pool',
-        'annual_rent', 'ebitdar', 'sales',
-        'geo_constraint', 'aadt',
-    ]
-    df_display = df[[c for c in display_cols if c in df.columns]].copy()
-    df_display['scored_at'] = pd.to_datetime(
-        df_display['scored_at']
-    ).dt.strftime('%Y-%m-%d %H:%M')
+            def color_grade(val):
+                return {
+                    'A': 'background-color:#D4EDDA',
+                    'B': 'background-color:#FFF3CD',
+                    'C': 'background-color:#F8D7DA'
+                }.get(val, '')
 
-    if df_display.empty:
-        st.info("No scored properties yet — score a property and save it to see it here.")
-        st.stop()
+            st.dataframe(
+                df_display.style.map(color_grade, subset=['formula_grade']),
+                use_container_width=True,
+                height=500
+            )
 
-    grade_filter = st.multiselect(
-        "Filter by Grade",
-        options=["A", "B", "C"],
-        default=["A", "B", "C"],
-        key="dash_grade_filter"
-    )
-    df_display = df_display[df_display['formula_grade'].isin(grade_filter)]
-
-    def color_grade(val):
-        return {
-            'A': 'background-color:#D4EDDA',
-            'B': 'background-color:#FFF3CD',
-            'C': 'background-color:#F8D7DA'
-        }.get(val, '')
-
-    st.dataframe(
-        df_display.style.map(color_grade, subset=['formula_grade']),
-        use_container_width=True,
-        height=500
-    )
-
-    # ── Download full history ─────────────────────────────────────
-    st.divider()
-    output = io.BytesIO()
-    df_export = pd.DataFrame(rows).astype(str).replace('None', '').replace('nan', '')
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df_export.to_excel(
-            writer, index=False, sheet_name='Scored Properties'
-        )
-    output.seek(0)
-    st.download_button(
-        label="⬇️ Download Full History as Excel",
-        data=output,
-        file_name="YAFC_Scored_History.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+            # ── Download full history ─────────────────────────────
+            st.divider()
+            output = io.BytesIO()
+            df_export = pd.DataFrame(rows).astype(str).replace('None', '').replace('nan', '')
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df_export.to_excel(
+                    writer, index=False, sheet_name='Scored Properties'
+                )
+            output.seek(0)
+            st.download_button(
+                label="⬇️ Download Full History as Excel",
+                data=output,
+                file_name="YAFC_Scored_History.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
 # ─────────────────────────────────────────────
 # TAB 3 — UPLOAD PORTFOLIO
