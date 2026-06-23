@@ -334,6 +334,10 @@ with tab_dash:
         df_display['scored_at']
     ).dt.strftime('%Y-%m-%d %H:%M')
 
+    if df_display.empty:
+        st.info("No scored properties yet — score a property and save it to see it here.")
+        st.stop()
+
     grade_filter = st.multiselect(
         "Filter by Grade",
         options=["A", "B", "C"],
