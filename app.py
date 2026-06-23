@@ -272,6 +272,7 @@ hr { border-color: #EAECEF !important; }
 """, unsafe_allow_html=True)
 
 # ── Header ──────────────────────────────────────────────────────────────────
+st.markdown('<div style="padding-top: 1rem"></div>', unsafe_allow_html=True)
 st.markdown(
     '<div style="padding:2rem 0 1.5rem 0;">'
     '<p style="font-size:2.2rem;font-weight:700;color:#1D1740;'
